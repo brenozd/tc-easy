@@ -1,0 +1,16 @@
+#ifndef __TC_EASY_H__
+#define __TC_EASY_H__
+
+#define TC_EASY_ADD_ROUTE_KEYWORD "add"
+#define TC_EASY_REMOVE_ROUTE_KEYWORD "rm"
+#define TC_EASY_SRC_ADDR_KEYWORD "from"
+#define TC_EASY_DST_ADDR_KEYWORD "to"
+
+
+#define TC_EASY_OK 0
+#define TC_EASY_ERROR 1
+#define TC_EASY_INTERFACE_NOT_FOUND 2
+#define TC_EASY_INVALID_SRC_ADDR 3
+#define TC_EASY_INVALID_DST_ADDR 4
+
+#endif

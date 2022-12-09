@@ -1,12 +1,11 @@
 #include "tc_api.h"
 
-#include <stdio.h>
-int tc_add_route(/*in_addr_t src_ip, in_addr_t dest_ip, uint latency, uint jitter, uint packet_loss, uint upload_bandwidth, uint download_bandwidth*/) {
-    printf("add_tc_route\n");
+int tc_api_add_route(tc_api_interface interface) {
+    printf("add_tc_route: %s\n", interface.name);
     return TC_API_OK;
 }
 
-int tc_remove_route(in_addr_t src_ip, in_addr_t dest_ip) {
-    printf("remove_tc_route\n");
-    return TC_API_ERROR;
+int tc_api_remove_route(tc_api_interface interface) {
+    printf("remove_tc_route: %s\n", interface.name);
+    return TC_API_OK;
 }

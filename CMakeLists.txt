@@ -15,7 +15,7 @@ set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
 include(CPack)
 
 # tc_api
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/tc_api/)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/tc_api/ ${CMAKE_CURRENT_SOURCE_DIR}/src/iproute2/ ${CMAKE_CURRENT_SOURCE_DIR}/src/iproute2/include)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/tc_api/)
 
 target_link_libraries(tc-easy tc-api)

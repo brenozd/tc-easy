@@ -143,6 +143,8 @@ _parse_args_add() {
     fi
 
     # TODO: Antes de fazer qualquer coisa checar se há banda disponível no TC
+    # TODO: Checar se há uma rota no ip src e dst
+
     __ifb_dev="ifb_$__dev"
     if ! _check_if_interface_exists "$__ifb_dev"; then
         ip link add name "$__ifb_dev" type ifb
@@ -175,14 +177,26 @@ _add_route() {
     __add_route_corruption="$9"
     __add_route_bandwidth="${10}"
 
-    __dev_qdisc=$(_get_dev_qdisc "$__dev" "root")
-    if [ "$__dev_qdisc" != "htb" ]; then
-        _log warn "Interface $__add_route_dev has qdisc $__dev_qdisc associated with it"
+    __add_route_dev_qdisc=$(_get_dev_qdisc "$__add_route_dev" "root")
+    if [ "$__add_route_dev_qdisc" != "htb" ] || [ "$__continue" = "y" ]; then
+        _log warn "Interface $__add_route_dev has qdisc $__add_route_dev_qdisc associated with it"
         echo "Do you want to continue? All qdisc from interface $__add_route_dev will be deleted [y|n]"
         read -r __continue
         if [ "$__continue" != "y" ]; then
             echo "Aborting tc-easy"
+            return
         fi
+
+        tc qdisc del dev "$__add_route_dev" root >/dev/null 2>&1
+        tc qdisc add dev "$__add_route_dev" root handle 1: htb
+        # TODO: A banda máxima de download/upload deve ser sempre simétrica?
+        # TODO: Adicionar fifo_fast como classe default do htb
+        __add_route_dev_speed=$(cat /sys/class/net/"$__add_route_dev"/speed >/dev/null 2>&1)
+        if [ -z "$__add_route_dev_speed" ] || [ "$__add_route_dev_speed"  -lt 0 ]; then
+            _log "warn" "Cannot get $__add_route_dev speed, assuming 1000mbps"
+            __add_route_dev_speed="1000"
+        fi
+        tc class add dev "$__add_route_dev" parent 1: classid 1:1 htb rate "$__add_route_dev_speed"mbit ceil "$__add_route_dev_speed"mbit
     fi
 
     # TODO: Os parâmetros do NetEm devem ser mirrored?
@@ -213,37 +227,21 @@ _add_route() {
         __add_route_netem_params="$__add_route_netem_params corrupt ${__add_route_corruption}%"
     fi
 
-    tc qdisc del dev "$__add_route_dev" root >/dev/null 2>&1
-
-    # TODO: Arrumar os handles do qdisc, começando em 0
-    # TODO: Adicionar fifo_fast como classe default do htb
-    # TODO: Se houver outro qdisc como root, perguntar para o usuario o que fazer
-    # TODO: Limitar a banda do root como a
-
-    __dev_speed=$(cat /sys/class/net/"$__add_route_dev"/speed >/dev/null 2>&1)
-    if [ -z "$__dev_speed" ] || [ "$__dev_speed"  -lt 0 ]; then
-        _log "warn" "Cannot get $__add_route_dev speed, assuming 1000mbps"
-        __dev_speed="1000"
-    fi
-
-    tc qdisc add dev "$__add_route_dev" root handle 1: htb
-
-    # TODO: A banda máxima de download/upload deve ser sempre simétrica?
-    tc class add dev "$__add_route_dev" parent 1: classid 1:1 htb rate "$__dev_speed"mbit ceil "$__dev_speed"mbit
-
     # TODO: checar se há banda disponível para a classe
+
+    __add_route_new_handle=$(tc class show dev "$__add_route_dev" | grep htb | awk '{print $3}' | sort | tail -n1 | awk -F ':' '{print $2+1}')
     __add_route_bandwidth=${__add_route_bandwidth:-"50"}
     # Se não houver banda disponível, perguntar quando alocar e checar se o valor fornecido é menor que o máximo disponível (speed da interface - soma de todas as rates dos HTBs)
-    tc class add dev "$__add_route_dev" parent 1:1 classid 1:10 htb rate "$__add_route_bandwidth"mbit ceil "$__add_route_bandwidth"mbit prio 2
+    tc class add dev "$__add_route_dev" parent 1:1 classid 1:"$__add_route_new_handle" htb rate "$__add_route_bandwidth"mbit ceil "$__add_route_bandwidth"mbit prio 2
 
     if [ -n "$__add_route_netem_params" ]; then
         # Remove trailing whitespaces, otherwhise TC does not accept __add_route_netem_params
         __add_route_netem_params=$(echo "$__add_route_netem_params" | cut -f 2- -d ' ')
-        tc qdisc add dev "$__add_route_dev" parent 1:10 handle 10:1 netem $__add_route_netem_params
+        tc qdisc add dev "$__add_route_dev" parent 1:"$__add_route_new_handle" handle "$__add_route_new_handle":1 netem $__add_route_netem_params
     fi
 
     # TODO: Checar se o __src_ip/__dst_ip são IPv4 Válido
-    tc filter add dev "$__add_route_dev" protocol ip parent 1: prio 2 u32 match ip src "$__add_route_src_ip" match ip dst "$__add_route_dst_ip" flowid 1:10
+    tc filter add dev "$__add_route_dev" protocol ip parent 1: prio 2 u32 match ip src "$__add_route_src_ip" match ip dst "$__add_route_dst_ip" flowid 1:"$__add_route_new_handle"
 }
 
 _parse_args_rm() {
@@ -296,8 +294,61 @@ _parse_args_rm() {
 
 }
 
+_show_help_ls() {
+    printf "Usage: tc-easy ls dev <interface>\n"
+    printf "Optional: from <ip>, to <ip>\n"
+}
+
 _parse_args_ls() {
-    echo "Not implemented yet"
+    while :; do
+        case $1 in
+            -h|-\?|--help)   # Call a "show_help" function to display a synopsis, then exit.
+                _show_help_ls
+                exit
+                ;;
+            dev)
+                shift
+                _check_if_interface_exists "$1" || return
+                __dev="$1"
+                shift
+                ;;
+            from)
+                shift
+                __src_ip="$1"
+                shift
+                ;;
+            to)
+                shift
+                __dst_ip="$1"
+                shift
+                ;;
+            -?*)
+                printf 'WARN: Unknown add option: %s\n' "$1" >&2
+                _show_help_add
+                ;;
+            *)
+                break
+        esac
+    done
+
+    if [ -z "$__dev" ]; then
+        _show_help_ls
+        return
+    fi
+
+    _list_routes "$__dev"
+}
+
+_list_routes() {
+    __list_route_dev="$1"
+    __list_route_src_ip="$2"
+    __list_route_dst_ip="$3"
+    __list_routes_dev_qdiscs=$(tc qdisc show dev "$__list_route_dev")
+    __list_routes_dev_classes=$(tc class show dev "$__list_route_dev")
+    __list_routes_dev_filters=$(tc filter show dev "$__list_route_dev")
+
+
+    printf "%s\n" "$__list_routes_dev_qdiscs"
 }
 
 _show_help_global() {

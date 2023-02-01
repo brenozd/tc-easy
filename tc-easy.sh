@@ -3,6 +3,10 @@
 # set -e
 set -x
 
+# Global Variables
+__g_ip_string=""
+__g_ip_hex=""
+
 _log() {
     case $1 in
         error)
@@ -24,6 +28,29 @@ _log() {
     esac
 
     printf '%s - [%s] - %s\n' "$(date)" "$__tag" "$2"
+}
+
+# Convert an formated IPv4 string to hexadecimal. Return value is variable __g_ip_hex
+_ip_string_to_hex() {
+    __s2h_ip="$1"
+    __g_ip_hex=""
+    __s2h_old_IFS="$IFS"
+    IFS="."
+    for num in $__s2h_ip; do
+        __g_ip_hex="$__g_ip_hex$(printf "%02x" "$num")"
+    done
+    IFS=__s2h_old_IFS
+}
+
+# Convert an hexadecimal IPv4 to a formatted string. Return value is variable __g_ip_string
+_ip_hex_to_string() {
+    __h2s_hex=$( echo "$1" | sed 's/.\{2\}/& /g')
+    __g_ip_string=""
+
+    for hex in $__h2s_hex; do
+        __g_ip_string="$__g_ip_string$(printf "%d" "0x$hex")."
+    done
+    __g_ip_string=$( echo "$__g_ip_string" | cut -d'.' -f 1,2,3,4)
 }
 
 # Utilizar modprobe para habilitar os módulos utilizados
@@ -143,7 +170,7 @@ _parse_args_add() {
     fi
 
     # TODO: Antes de fazer qualquer coisa checar se há banda disponível no TC
-    # TODO: Checar se há uma rota no ip src e dst
+    # TODO: Checar se há uma rota com o mesmo ip de src e dst (porta tbm)
 
     __ifb_dev="ifb_$__dev"
     if ! _check_if_interface_exists "$__ifb_dev"; then
@@ -162,7 +189,6 @@ _parse_args_add() {
     tc filter add dev "$__dev" ingress matchall action mirred egress redirect dev "$__ifb_dev"
 
     _log info "Added route from $__src_ip to $__dst_ip via $__dev"
-
 }
 
 _add_route() {

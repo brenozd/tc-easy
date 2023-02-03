@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
 # set -e
-set -x
+# set -x
 
 # Global Variables
 __g_ip_string=""
@@ -39,18 +39,21 @@ _ip_string_to_hex() {
     for num in $__s2h_ip; do
         __g_ip_hex="$__g_ip_hex$(printf "%02x" "$num")"
     done
-    IFS=__s2h_old_IFS
+    IFS=$__s2h_old_IFS
 }
 
 # Convert an hexadecimal IPv4 to a formatted string. Return value is variable __g_ip_string
 _ip_hex_to_string() {
-    __h2s_hex=$( echo "$1" | sed 's/.\{2\}/& /g')
+    __h2s_hex=$(echo "$1" | sed 's/.\{2\}/& /g')
     __g_ip_string=""
 
+    _ip_h2s_old_IFS=$IFS
+    IFS=" "
     for hex in $__h2s_hex; do
         __g_ip_string="$__g_ip_string$(printf "%d" "0x$hex")."
     done
-    __g_ip_string=$( echo "$__g_ip_string" | cut -d'.' -f 1,2,3,4)
+    IFS=$_ip_h2s_old_IFS
+    __g_ip_string=$(echo "$__g_ip_string" | cut -d'.' -f 1,2,3,4)
 }
 
 # Utilizar modprobe para habilitar os módulos utilizados
@@ -102,17 +105,17 @@ _parse_args_add() {
             dev)
                 shift
                 _check_if_interface_exists "$1" || return
-                __dev="$1"
+                __args_add_dev="$1"
                 shift
                 ;;
             from)
                 shift
-                __src_ip="$1"
+                __args_add_src_ip="$1"
                 shift
                 ;;
             to)
                 shift
-                __dst_ip="$1"
+                __args_add_dst_ip="$1"
                 shift
                 ;;
             --latency|-l)
@@ -164,31 +167,69 @@ _parse_args_add() {
         esac
     done
 
-    if [ -z "$__dev" ] || [ -z "$__src_ip" ] || [ -z "$__dst_ip" ]; then
+    # TODO: Antes de fazer qualquer coisa checar se há banda disponível no TC
+    if [ -z "$__args_add_dev" ] || [ -z "$__args_add_src_ip" ] || [ -z "$__args_add_dst_ip" ]; then
         _show_help_add
         return
     fi
 
-    # TODO: Antes de fazer qualquer coisa checar se há banda disponível no TC
-    # TODO: Checar se há uma rota com o mesmo ip de src e dst (porta tbm)
+    # TODO: Checar se src_ip e dst_ip são IPv4 Válidos (somente por xxx.xxx.xxx.xxx)
+    __args_add_interface_routes=$(tc filter show dev "$__args_add_dev")
+    __args_add_flow_handle=""
+    __args_add_old_IFS=$IFS
+    IFS="
+"
+    for line in $__args_add_interface_routes; do
+        case $line in
+            # If line is a filter definition, get handle
+            "filter"*)
+                __args_add_flow_handle=$(echo "$line" | sed -n -e 's/^.*\([0-9]\+:[0-9]\+\).*/\1/p')
+                __args_add_src_ip_filter=""
+                __args_add_dst_ip_filter=""
+            ;;
+            *"match"*"at 12")
+                # TODO: checar o que é o argumento depois do / no IP
+                __args_add_src_ip_filter=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
+            ;;
+            *"match"*"at 16")
+                __args_add_dst_ip_filter=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
+            ;;
+        esac
 
-    __ifb_dev="ifb_$__dev"
+        if [ -n "$__args_add_flow_handle" ] && [ -n "$__args_add_src_ip_filter" ] && [ -n "$__args_add_dst_ip_filter" ]; then
+            _ip_hex_to_string $__args_add_src_ip_filter
+            __args_add_src_ip_filter="$__g_ip_string"
+
+            _ip_hex_to_string $__args_add_dst_ip_filter
+            __args_add_dst_ip_filter="$__g_ip_string"
+
+            # TODO: Ao invés de abortar, perguntar ao usuário se deseja alterar a rota
+            # TODO: Imprimir informações da rota
+            if [ "$__args_add_src_ip" = "$__args_add_src_ip_filter" ] && [ "$__args_add_dst_ip" = "$__args_add_dst_ip_filter" ]; then
+                printf "Route from %s to %s already exists (flowid %s), aborting!\n" "$__args_add_src_ip_filter" "$__args_add_dst_ip_filter" "$__args_add_flow_handle"
+                exit 10
+            fi
+        fi
+    done
+    IFS=$__args_add_old_IFS
+
+    __ifb_dev="ifb_$__args_add_dev"
     if ! _check_if_interface_exists "$__ifb_dev"; then
         ip link add name "$__ifb_dev" type ifb
     fi
     ip link set dev "$__ifb_dev" up
 
-    _add_route "$__dev"     "$__src_ip" "$__dst_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_download"
-    _add_route "$__ifb_dev" "$__src_ip" "$__dst_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_upload"
+    _add_route "$__args_add_dev"     "$__args_add_src_ip" "$__args_add_dst_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_download"
+    _add_route "$__ifb_dev" "$__args_add_src_ip" "$__args_add_dst_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_upload"
 
-    if _get_dev_qdisc "$__dev" "ingress"; then
-        tc qdisc del dev "$__dev" ingress
+    if _get_dev_qdisc "$__args_add_dev" "ingress"; then
+        tc qdisc del dev "$__args_add_dev" ingress
     fi
 
-    tc qdisc add dev "$__dev" ingress
-    tc filter add dev "$__dev" ingress matchall action mirred egress redirect dev "$__ifb_dev"
+    tc qdisc add dev "$__args_add_dev" ingress
+    tc filter add dev "$__args_add_dev" ingress matchall action mirred egress redirect dev "$__ifb_dev"
 
-    _log info "Added route from $__src_ip to $__dst_ip via $__dev"
+    _log info "Added route from $__args_add_src_ip to $__args_add_dst_ip via $__args_add_dev"
 }
 
 _add_route() {

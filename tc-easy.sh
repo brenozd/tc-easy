@@ -4,8 +4,11 @@
 # set -x
 
 # Global Variables
+__g_force_cmd=0
+
 __g_ip_string=""
 __g_ip_hex=""
+__g_dev_qdisc=""
 
 _log() {
     case $1 in
@@ -79,20 +82,21 @@ _check_if_interface_exists() {
     return 1
 }
 
+# Gets the current qdisc associated with dev at classid. Return value is variable __g_dev_qdisc
 _get_dev_qdisc() {
-    __dev="$1"
-    __classid="$2"
-    __qdisc=$(tc qdisc show dev "$__dev" "$__classid")
+    __get_dev_qdisc_dev="$1"
+    __get_dev_qdisc_classid="$2"
+    __get_dev_qdiscqdisc=$(tc qdisc show dev "$__get_dev_qdisc_dev" "$__get_dev_qdisc_classid")
     if [ -z "$__qdisc" ]; then
         return 1
     fi
-    echo "$__qdisc" | awk '{print $2}'
+    __g_dev_qdisc=$(echo "$__qdisc" | awk '{print $2}')
     return 0
 }
 
 _show_help_add() {
     echo "Usage: tc-easy add dev <interface> from <ip> to <ip> OPTIONS"
-    printf "Options:\n\t--latency=<value>\n\t--packetloss=<value>\n\t--jitter=<value> (only used if --latency is passed)\n\t--download=<value>\n\t--upload=<value>\n"
+    printf "Options:\n\t--latency=<value>\n\t--loss=<value>\n\t--jitter=<value> (only used if --latency is passed)\n\t--download=<value>\n\t--upload=<value>\n"
 }
 
 _parse_args_add() {
@@ -118,6 +122,10 @@ _parse_args_add() {
                 __args_add_dst_ip="$1"
                 shift
                 ;;
+            -f|--froce)
+                __g_force_cmd=1
+                shift
+                ;;
             --latency|-l)
                 shift
                 __latency="$1"
@@ -128,7 +136,7 @@ _parse_args_add() {
                 __jitter="$1"
                 shift
                 ;;
-            --packetloss|-p)
+            --loss|-p)
                 shift
                 __packet_loss="$1"
                 shift
@@ -161,6 +169,7 @@ _parse_args_add() {
             -?*)
                 printf 'WARN: Unknown add option: %s\n' "$1" >&2
                 _show_help_add
+                return
                 ;;
             *)
                 break
@@ -244,16 +253,17 @@ _add_route() {
     __add_route_corruption="$9"
     __add_route_bandwidth="${10}"
 
-    __add_route_dev_qdisc=$(_get_dev_qdisc "$__add_route_dev" "root")
-    if [ "$__add_route_dev_qdisc" != "htb" ] || [ "$__continue" = "y" ]; then
-        _log warn "Interface $__add_route_dev has qdisc $__add_route_dev_qdisc associated with it"
-        echo "Do you want to continue? All qdisc from interface $__add_route_dev will be deleted [y|n]"
-        read -r __continue
-        if [ "$__continue" != "y" ]; then
-            echo "Aborting tc-easy"
-            return
+    _get_dev_qdisc "$__add_route_dev" "root"
+    if [ "$__g_dev_qdisc" != "htb" ]; then
+        if [ $__g_force_cmd -ne 1 ] &&  [ "$__continue" != "y" ]; then
+            _log warn "Interface $__add_route_dev has qdisc $__g_dev_qdisc associated with it"
+            echo "Do you want to continue? All qdisc from interface $__add_route_dev will be deleted [y|n]"
+            read -r __continue
+            if [ "$__continue" != "y" ]; then
+                echo "Aborting tc-easy"
+                return
+            fi
         fi
-
         tc qdisc del dev "$__add_route_dev" root >/dev/null 2>&1
         tc qdisc add dev "$__add_route_dev" root handle 1: htb
         # TODO: A banda máxima de download/upload deve ser sempre simétrica?

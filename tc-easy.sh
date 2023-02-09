@@ -197,7 +197,6 @@ _parse_args_add() {
         return
     fi
 
-    # TODO: Checar se src_ip e dst_ip são IPv4 Válidos (somente por xxx.xxx.xxx.xxx)
     # Check if route already exists
     __args_add_interface_routes=$(tc filter show dev "$__args_add_dev")
     __args_add_flow_handle=""
@@ -298,7 +297,6 @@ _add_route() {
     __add_route_netem_params=""
     if [ -n "$__add_route_latency" ]; then
         __add_route_netem_params="$__add_route_netem_params delay ${__add_route_latency}ms"
-        # TODO: Checar se setando o jitter > latencia o TC buga
         if [ -n "$__add_route_jitter" ]; then
             __add_route_netem_params="$__add_route_netem_params ${__add_route_jitter}ms distribution normal"
         fi
@@ -321,7 +319,6 @@ _add_route() {
     fi
 
     # TODO: checar se há banda disponível para a classe
-
     __add_route_new_handle=$(tc class show dev "$__add_route_dev" | grep htb | awk '{print $3}' | sort | tail -n1 | awk -F ':' '{print $2+1}')
     __add_route_bandwidth=${__add_route_bandwidth:-"50"}
     # Se não houver banda disponível, perguntar quando alocar e checar se o valor fornecido é menor que o máximo disponível (speed da interface - soma de todas as rates dos HTBs)
@@ -333,7 +330,6 @@ _add_route() {
         tc qdisc add dev "$__add_route_dev" parent 1:"$__add_route_new_handle" handle "$__add_route_new_handle":1 netem $__add_route_netem_params
     fi
 
-    # TODO: Checar se o __src_ip/__dst_ip são IPv4 Válido
     tc filter add dev "$__add_route_dev" protocol ip parent 1: prio 2 u32 match ip src "$__add_route_src_ip" match ip dst "$__add_route_dst_ip" flowid 1:"$__add_route_new_handle"
 }
 

@@ -6,6 +6,7 @@
 # Global Variables
 __g_force_cmd=0
 
+# Global return variables
 __g_ip_string=""
 __g_ip_hex=""
 __g_dev_qdisc=""
@@ -57,6 +58,15 @@ _ip_hex_to_string() {
     done
     IFS=$_ip_h2s_old_IFS
     __g_ip_string=$(echo "$__g_ip_string" | cut -d'.' -f 1,2,3,4)
+}
+
+# Check if a given IP is a valid IPv4 construction (do not check if values are greater than 255 tho)
+_is_ipv4_valid() {
+    __is_ipv4_valid_ip=$(echo "$1" | sed -n -e 's/^\([0-9]\{1,3\}\.\)\{3\}[0-9]\{1,3\}$/\0/p')
+    if [ -z "$__is_ipv4_valid_ip" ]; then
+        return 1
+    fi
+    return 0
 }
 
 # Utilizar modprobe para habilitar os módulos utilizados
@@ -182,7 +192,13 @@ _parse_args_add() {
         return
     fi
 
+    if ! _is_ipv4_valid "$__args_add_src_ip" || ! _is_ipv4_valid "$__args_add_dst_ip"; then
+        _log "error" "Either source or destination IP is no a valid IPv4"
+        return
+    fi
+
     # TODO: Checar se src_ip e dst_ip são IPv4 Válidos (somente por xxx.xxx.xxx.xxx)
+    # Check if route already exists
     __args_add_interface_routes=$(tc filter show dev "$__args_add_dev")
     __args_add_flow_handle=""
     __args_add_old_IFS=$IFS
@@ -215,7 +231,7 @@ _parse_args_add() {
             # TODO: Ao invés de abortar, perguntar ao usuário se deseja alterar a rota
             # TODO: Imprimir informações da rota
             if [ "$__args_add_src_ip" = "$__args_add_src_ip_filter" ] && [ "$__args_add_dst_ip" = "$__args_add_dst_ip_filter" ]; then
-                printf "Route from %s to %s already exists (flowid %s), aborting!\n" "$__args_add_src_ip_filter" "$__args_add_dst_ip_filter" "$__args_add_flow_handle"
+                _log "warn" "Route from $__args_add_src_ip_filter to $__args_add_dst_ip_filter already exists (flowid $__args_add_flow_handle), aborting!\n"
                 exit 10
             fi
         fi
@@ -238,7 +254,7 @@ _parse_args_add() {
     tc qdisc add dev "$__args_add_dev" ingress
     tc filter add dev "$__args_add_dev" ingress matchall action mirred egress redirect dev "$__ifb_dev"
 
-    _log info "Added route from $__args_add_src_ip to $__args_add_dst_ip via $__args_add_dev"
+    _log "info" "Added route from $__args_add_src_ip to $__args_add_dst_ip via $__args_add_dev"
 }
 
 _add_route() {

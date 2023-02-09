@@ -86,11 +86,11 @@ _check_if_interface_exists() {
 _get_dev_qdisc() {
     __get_dev_qdisc_dev="$1"
     __get_dev_qdisc_classid="$2"
-    __get_dev_qdiscqdisc=$(tc qdisc show dev "$__get_dev_qdisc_dev" "$__get_dev_qdisc_classid")
-    if [ -z "$__qdisc" ]; then
+    __get_dev_qdisc_root_qdisc=$(tc qdisc show dev "$__get_dev_qdisc_dev" "$__get_dev_qdisc_classid")
+    if [ -z "$__get_dev_qdisc_root_qdisc" ]; then
         return 1
     fi
-    __g_dev_qdisc=$(echo "$__qdisc" | awk '{print $2}')
+    __g_dev_qdisc=$(echo "$__get_dev_qdisc_root_qdisc" | awk '{print $2}')
     return 0
 }
 
@@ -253,8 +253,8 @@ _add_route() {
     __add_route_corruption="$9"
     __add_route_bandwidth="${10}"
 
-    _get_dev_qdisc "$__add_route_dev" "root"
-    if [ "$__g_dev_qdisc" != "htb" ]; then
+
+    if _get_dev_qdisc "$__add_route_dev" "root" && [ "$__g_dev_qdisc" != "htb" ]; then
         if [ $__g_force_cmd -ne 1 ] &&  [ "$__continue" != "y" ]; then
             _log warn "Interface $__add_route_dev has qdisc $__g_dev_qdisc associated with it"
             echo "Do you want to continue? All qdisc from interface $__add_route_dev will be deleted [y|n]"

@@ -10,6 +10,7 @@ __g_force_cmd=0
 __g_ip_string=""
 __g_ip_hex=""
 __g_dev_qdisc=""
+__g_route_flow_handle=""
 
 _log() {
     case $1 in
@@ -90,6 +91,58 @@ _check_if_interface_exists() {
     done
     # _log "Interface $1 is not available"
     return 1
+}
+
+
+# Check if route already exists
+# $1 is the interface (device) name
+# $2 is the src ip
+# $3 is the dst ip
+# Returns 1 if routes exits, 0 otherwhise.
+# Sets __g_route_flow_handle to the flow handle id if return 1
+_check_if_route_exists() {
+    __check_route_dev="$1"
+    __check_route_src_ip="$2"
+    __check_route_dst_ip="$3"
+
+    __check_route_dev_routes=$(tc filter show dev "$__check_route_dev")
+    __check_route_flow_handle=""
+    __check_route_old_ifs=$IFS
+    IFS="
+    "
+
+    for line in $__check_route_dev_routes; do
+        case $line in
+            # If line is a filter definition, get handle
+            "filter"*)
+                __check_route_flow_handle=$(echo "$line" | sed -n -e 's/^.*\([0-9]\+:[0-9]\+\).*/\1/p')
+                __check_route_src_ip_filter=""
+                __check_route_dst_ip_filter=""
+            ;;
+            *"match"*"at 12")
+                # TODO: checar o que é o argumento depois do / no IP
+                __check_route_src_ip_filter=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
+            ;;
+            *"match"*"at 16")
+                __check_route_dst_ip_filter=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
+            ;;
+        esac
+
+        if [ -n "$__check_route_flow_handle" ] && [ -n "$__check_route_src_ip_filter" ] && [ -n "$__check_route_dst_ip_filter" ]; then
+            _ip_hex_to_string $__check_route_src_ip_filter
+            __check_route_src_ip_filter="$__g_ip_string"
+
+            _ip_hex_to_string $__check_route_dst_ip_filter
+            __check_route_dst_ip_filter="$__g_ip_string"
+
+            if [ "$__check_route_src_ip" = "$__check_route_src_ip_filter" ] && [ "$__check_route_dst_ip" = "$__check_route_dst_ip_filter" ]; then
+                __g_route_flow_handle=$__check_route_flow_handle
+                return 1
+            fi
+        fi
+    done
+    IFS=$__check_route_old_ifs
+    return 0
 }
 
 # Gets the current qdisc associated with dev at classid. Return value is variable __g_dev_qdisc
@@ -193,49 +246,14 @@ _parse_args_add() {
     fi
 
     if ! _is_ipv4_valid "$__args_add_src_ip" || ! _is_ipv4_valid "$__args_add_dst_ip"; then
-        _log "error" "Either source or destination IP is no a valid IPv4"
+        _log "error" "Either source or destination IP is not a valid IPv4"
         return
     fi
 
-    # Check if route already exists
-    __args_add_interface_routes=$(tc filter show dev "$__args_add_dev")
-    __args_add_flow_handle=""
-    __args_add_old_IFS=$IFS
-    IFS="
-"
-    for line in $__args_add_interface_routes; do
-        case $line in
-            # If line is a filter definition, get handle
-            "filter"*)
-                __args_add_flow_handle=$(echo "$line" | sed -n -e 's/^.*\([0-9]\+:[0-9]\+\).*/\1/p')
-                __args_add_src_ip_filter=""
-                __args_add_dst_ip_filter=""
-            ;;
-            *"match"*"at 12")
-                # TODO: checar o que é o argumento depois do / no IP
-                __args_add_src_ip_filter=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
-            ;;
-            *"match"*"at 16")
-                __args_add_dst_ip_filter=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
-            ;;
-        esac
-
-        if [ -n "$__args_add_flow_handle" ] && [ -n "$__args_add_src_ip_filter" ] && [ -n "$__args_add_dst_ip_filter" ]; then
-            _ip_hex_to_string $__args_add_src_ip_filter
-            __args_add_src_ip_filter="$__g_ip_string"
-
-            _ip_hex_to_string $__args_add_dst_ip_filter
-            __args_add_dst_ip_filter="$__g_ip_string"
-
-            # TODO: Ao invés de abortar, perguntar ao usuário se deseja alterar a rota
-            # TODO: Imprimir informações da rota
-            if [ "$__args_add_src_ip" = "$__args_add_src_ip_filter" ] && [ "$__args_add_dst_ip" = "$__args_add_dst_ip_filter" ]; then
-                _log "warn" "Route from $__args_add_src_ip_filter to $__args_add_dst_ip_filter already exists (flowid $__args_add_flow_handle), aborting!\n"
-                exit 10
-            fi
-        fi
-    done
-    IFS=$__args_add_old_IFS
+    if _check_if_route_exists "$__args_add_dev" "$__args_add_src_ip" "$__args_add_dst_ip"; then
+        _log "error" "Route from $__args_add_src_ip to  $__args_add_dst_ip via $__args_add_dev already exists (flow $__g_route_flow_handle), aborting"
+        return
+    fi
 
     __ifb_dev="ifb_$__args_add_dev"
     if ! _check_if_interface_exists "$__ifb_dev"; then
@@ -243,7 +261,7 @@ _parse_args_add() {
     fi
     ip link set dev "$__ifb_dev" up
 
-    _add_route "$__args_add_dev"     "$__args_add_src_ip" "$__args_add_dst_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_download"
+    _add_route "$__args_add_dev" "$__args_add_src_ip" "$__args_add_dst_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_download"
     _add_route "$__ifb_dev" "$__args_add_src_ip" "$__args_add_dst_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_upload"
 
     if _get_dev_qdisc "$__args_add_dev" "ingress"; then
@@ -333,6 +351,10 @@ _add_route() {
     tc filter add dev "$__add_route_dev" protocol ip parent 1: prio 2 u32 match ip src "$__add_route_src_ip" match ip dst "$__add_route_dst_ip" flowid 1:"$__add_route_new_handle"
 }
 
+_show_help_rm() {
+    echo "Usage: tc-easy rm dev <interface> from <ip> to <ip>"
+}
+
 _parse_args_rm() {
     __dev=""
     __src_ip=""
@@ -341,34 +363,54 @@ _parse_args_rm() {
     while :; do
         case $1 in
             -h|-\?|--help)   # Call a "show_help" function to display a synopsis, then exit.
-                _show_help_add
+                _show_help_rm
                 exit
                 ;;
             dev)
                 shift
                 _check_if_interface_exists "$1" || return
-                __dev="$1"
+                __args_rm_dev="$1"
                 shift
                 ;;
             from)
                 shift
-                __src_ip="$1"
+                __args_rm_src_ip="$1"
                 shift
                 ;;
             to)
                 shift
-                __dst_ip="$1"
+                __args_rm_dst_ip="$1"
                 shift
                 ;;
             -?*)
                 printf 'WARN: Unknown add option: %s\n' "$1" >&2
-                _show_help_add
+                _show_help_rm
                 ;;
             *)
                 break
         esac
     done
 
+    if [ -z "$__args_rm_dev" ] || [ -z "$__args_rm_src_ip" ] || [ -z "$__args_rm_dst_ip" ]; then
+        _show_help_add
+        return
+    fi
+
+    if ! _is_ipv4_valid "$__args_rm_src_ip" || ! _is_ipv4_valid "$__args_rm_dst_ip"; then
+        _log "error" "Either source or destination IP is not a valid IPv4"
+        return
+    fi
+
+    if _check_if_route_exists "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"; then
+        _remove_route "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"
+        _log "info" "Removed route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev"
+    fi
+    _log "error" "Route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev already exists (flow $__g_route_flow_handle), aborting"
+    return
+
+}
+
+_remove_route() {
     tc qdisc del dev "$__dev" root >/dev/null 2>&1
     if _get_dev_qdisc "$__dev" "ingress"; then
         tc qdisc del dev "$__dev" ingress >/dev/null 2>&1
@@ -378,9 +420,6 @@ _parse_args_rm() {
     if _check_if_interface_exists "$__ifb_dev"; then
         ip link delete "$__ifb_dev"
     fi
-
-    _log info "Removed route from $__src_ip to $__dst_ip via $__dev"
-
 }
 
 _show_help_ls() {

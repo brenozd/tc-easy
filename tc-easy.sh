@@ -106,7 +106,7 @@ _check_if_route_exists() {
     __check_route_flow_handle=""
     __check_route_old_ifs=$IFS
     IFS="
-    "
+"
 
     for line in $__check_route_dev_routes; do
         case $line in
@@ -135,6 +135,7 @@ _check_if_route_exists() {
             if [ "$__check_route_src_ip" = "$__check_route_src_ip_filter" ] && [ "$__check_route_dst_ip" = "$__check_route_dst_ip_filter" ]; then
                 __g_route_flow_handle=$__check_route_flow_handle
                 __check_route_rc=0
+                break
             fi
         fi
     done

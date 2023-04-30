@@ -74,10 +74,8 @@ _is_ipv4_valid() {
 _check_kmod_enabled() {
     module_state=$(awk -v mod="$1" '$1 ~mod {print $5}' /proc/modules)
     if [ "$module_state" = "Live" ]; then
-        # _log "Module $1 is enabled"
         return 0
     fi
-    # _log "Module $1 is disabled"
     return 1
 }
 
@@ -85,11 +83,9 @@ _check_if_interface_exists() {
     interfaces=$(ls /sys/class/net)
     for i in $interfaces; do
         if [ "$1" = "$i" ]; then
-            # _log "Found interface $1"
             return 0
         fi
     done
-    # _log "Interface $1 is not available"
     return 1
 }
 
@@ -98,9 +94,10 @@ _check_if_interface_exists() {
 # $1 is the interface (device) name
 # $2 is the src ip
 # $3 is the dst ip
-# Returns 1 if routes exits, 0 otherwhise.
-# Sets __g_route_flow_handle to the flow handle id if return 1
+# Returns 0 if routes exits, 0 otherwhise.
+# Sets __g_route_flow_handle to the flow handle id if return 0
 _check_if_route_exists() {
+    __check_route_rc=1
     __check_route_dev="$1"
     __check_route_src_ip="$2"
     __check_route_dst_ip="$3"
@@ -137,12 +134,12 @@ _check_if_route_exists() {
 
             if [ "$__check_route_src_ip" = "$__check_route_src_ip_filter" ] && [ "$__check_route_dst_ip" = "$__check_route_dst_ip_filter" ]; then
                 __g_route_flow_handle=$__check_route_flow_handle
-                return 1
+                __check_route_rc=0
             fi
         fi
     done
     IFS=$__check_route_old_ifs
-    return 0
+    return $__check_route_rc
 }
 
 # Gets the current qdisc associated with dev at classid. Return value is variable __g_dev_qdisc
@@ -230,7 +227,7 @@ _parse_args_add() {
                 shift
                 ;;
             -?*)
-                printf 'WARN: Unknown add option: %s\n' "$1" >&2
+                _log "error" "Unknown add option: $1"
                 _show_help_add
                 return
                 ;;
@@ -250,7 +247,7 @@ _parse_args_add() {
         return
     fi
 
-    if _check_if_route_exists "$__args_add_dev" "$__args_add_src_ip" "$__args_add_dst_ip"; then
+    if ! _check_if_route_exists "$__args_add_dev" "$__args_add_src_ip" "$__args_add_dst_ip"; then
         _log "error" "Route from $__args_add_src_ip to  $__args_add_dst_ip via $__args_add_dev already exists (flow $__g_route_flow_handle), aborting"
         return
     fi
@@ -289,7 +286,7 @@ _add_route() {
 
     if _get_dev_qdisc "$__add_route_dev" "root" && [ "$__g_dev_qdisc" != "htb" ]; then
         if [ $__g_force_cmd -ne 1 ] &&  [ "$__continue" != "y" ]; then
-            _log warn "Interface $__add_route_dev has qdisc $__g_dev_qdisc associated with it"
+            _log "warn" "Interface $__add_route_dev has qdisc $__g_dev_qdisc associated with it"
             echo "Do you want to continue? All qdisc from interface $__add_route_dev will be deleted [y|n]"
             read -r __continue
             if [ "$__continue" != "y" ]; then
@@ -383,7 +380,7 @@ _parse_args_rm() {
                 shift
                 ;;
             -?*)
-                printf 'WARN: Unknown add option: %s\n' "$1" >&2
+                _log "error" "Unknown add option: $1"
                 _show_help_rm
                 ;;
             *)
@@ -405,7 +402,7 @@ _parse_args_rm() {
         _log "error" "Route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev does not exists"
         return
     fi
-    
+
     _remove_route "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"
     _log "info" "Removed route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev"
     return
@@ -453,7 +450,7 @@ _parse_args_ls() {
                 shift
                 ;;
             -?*)
-                printf 'WARN: Unknown add option: %s\n' "$1" >&2
+                _log "error" "Unknown add option: $1"
                 _show_help_add
                 ;;
             *)
@@ -506,7 +503,7 @@ _parse_args_global() {
                 _parse_args_ls "$@"
                 ;;
             -?*)
-                _log 'warn' "Unknown subcommand: $1, avaible subcommands are: add, rm and ls"
+                _log "warn" "Unknown subcommand: $1, avaible subcommands are: add, rm and ls"
                 _show_help_global
                 ;;
             *)
@@ -518,29 +515,29 @@ _parse_args_global() {
 
 #check if user is root (maybe net admin is enough)
 if [ "$(id -u)" -ne 0 ]; then
-    _log "tc-easy need to be run as super user"
+    _log "error" "tc-easy need to be run as super user"
     exit 1
 fi
 
 #check for dependencies (iproute2, awk etc)
 if ! command -v ip >/dev/null; then
-    _log "iproute2 utility not found, consider installing it"
+    _log "error" "iproute2 utility not found, consider installing it"
     exit 2
 fi
 
 if ! command -v awk >/dev/null; then
-    _log "awk utility not found, consider installing it"
+    _log "error" "awk utility not found, consider installing it"
     exit 2
 fi
 
 if ! command -v tc >/dev/null; then
-    _log "TC utility not found, consider installing it"
+    _log "warn" "TC utility not found, consider installing it"
     exit 2
 fi
 
 #check if ifb and tc are enabled
 if ! _check_kmod_enabled "ifb"; then
-    _log "IFB kernel module is deactivated, try to activate it? [y|n]"
+    _log "warn" "IFB kernel module is deactivated, try to activate it? [y|n]"
     read -r __continue
     if [ "$__continue" = "y" ]; then
         if ! modprobe ifb; then
@@ -554,7 +551,7 @@ if ! _check_kmod_enabled "ifb"; then
 fi
 
 if ! _check_kmod_enabled "htb"; then
-    _log "HTB kernel module is deactivated, try to activate it? [y|n]"
+    _log "warn" "HTB kernel module is deactivated, try to activate it? [y|n]"
     read -r __continue
     if [ "$__continue" = "y" ]; then
         if ! modprobe sch_netem; then
@@ -567,7 +564,7 @@ if ! _check_kmod_enabled "htb"; then
 fi
 
 if ! _check_kmod_enabled "netem"; then
-    _log "NetEm kernel module is deactivated, try to activate it? [y|n]"
+    _log "warn" "NetEm kernel module is deactivated, try to activate it? [y|n]"
     read -r __continue
     if [ "$__continue" = "y" ]; then
         if ! modprobe sch_netem; then

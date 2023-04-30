@@ -401,11 +401,13 @@ _parse_args_rm() {
         return
     fi
 
-    if _check_if_route_exists "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"; then
-        _remove_route "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"
-        _log "info" "Removed route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev"
+    if ! _check_if_route_exists "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"; then
+        _log "error" "Route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev does not exists"
+        return
     fi
-    _log "error" "Route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev already exists (flow $__g_route_flow_handle), aborting"
+    
+    _remove_route "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"
+    _log "info" "Removed route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev"
     return
 
 }

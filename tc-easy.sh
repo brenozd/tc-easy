@@ -262,7 +262,7 @@ _parse_args_add() {
     ip link set dev "$__ifb_dev" up
 
     _add_route "$__args_add_dev" "$__args_add_src_ip" "$__args_add_dst_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_download"
-    _add_route "$__ifb_dev" "$__args_add_src_ip" "$__args_add_dst_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_upload"
+    _add_route "$__ifb_dev" "$__args_add_dst_ip" "$__args_add_src_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_upload"
 
     if _get_dev_qdisc "$__args_add_dev" "ingress"; then
         tc qdisc del dev "$__args_add_dev" ingress

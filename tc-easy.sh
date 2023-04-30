@@ -94,7 +94,7 @@ _check_if_interface_exists() {
 # $1 is the interface (device) name
 # $2 is the src ip
 # $3 is the dst ip
-# Returns 0 if routes exits, 0 otherwhise.
+# Returns 0 if routes exits, 1 otherwhise.
 # Sets __g_route_flow_handle to the flow handle id if return 0
 _check_if_route_exists() {
     __check_route_rc=1
@@ -247,7 +247,7 @@ _parse_args_add() {
         return
     fi
 
-    if ! _check_if_route_exists "$__args_add_dev" "$__args_add_src_ip" "$__args_add_dst_ip"; then
+    if _check_if_route_exists "$__args_add_dev" "$__args_add_src_ip" "$__args_add_dst_ip"; then
         _log "error" "Route from $__args_add_src_ip to  $__args_add_dst_ip via $__args_add_dev already exists (flow $__g_route_flow_handle), aborting"
         return
     fi
@@ -353,10 +353,6 @@ _show_help_rm() {
 }
 
 _parse_args_rm() {
-    __dev=""
-    __src_ip=""
-    __dst_ip=""
-
     while :; do
         case $1 in
             -h|-\?|--help)   # Call a "show_help" function to display a synopsis, then exit.
@@ -410,12 +406,14 @@ _parse_args_rm() {
 }
 
 _remove_route() {
-    tc qdisc del dev "$__dev" root >/dev/null 2>&1
-    if _get_dev_qdisc "$__dev" "ingress"; then
-        tc qdisc del dev "$__dev" ingress >/dev/null 2>&1
+    __rm_dev="$1"
+
+    tc qdisc del dev "$__rm_dev" root >/dev/null 2>&1
+    if _get_dev_qdisc "$__rm_dev" "ingress"; then
+        tc qdisc del dev "$__rm_dev" ingress >/dev/null 2>&1
     fi
 
-    __ifb_dev="ifb_$__dev"
+    __ifb_dev="ifb_$__rm_dev"
     if _check_if_interface_exists "$__ifb_dev"; then
         ip link delete "$__ifb_dev"
     fi
@@ -436,17 +434,17 @@ _parse_args_ls() {
             dev)
                 shift
                 _check_if_interface_exists "$1" || return
-                __dev="$1"
+                __args_ls_dev="$1"
                 shift
                 ;;
             from)
                 shift
-                __src_ip="$1"
+                __args_ls_src_ip="$1"
                 shift
                 ;;
             to)
                 shift
-                __dst_ip="$1"
+                __args_ls_dst_ip="$1"
                 shift
                 ;;
             -?*)

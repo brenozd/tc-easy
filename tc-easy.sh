@@ -487,28 +487,36 @@ _parse_args_global() {
         case $1 in
             -h|-\?|--help)   # Call a "show_help" function to display a synopsis, then exit.
                 _show_help_global
-                exit
+                exit 0
+                ;;
+            -d|--debug)
+                shift
+                set -x
                 ;;
             add)
                 shift
                 _parse_args_add "$@"
+                exit 0
                 ;;
             rm)
                 shift
                 _parse_args_rm "$@"
+                exit 0
                 ;;         # Handle
             ls)
                 shift
                 _parse_args_ls "$@"
+                exit 0
                 ;;
             -?*)
                 _log "warn" "Unknown subcommand: $1, avaible subcommands are: add, rm and ls"
                 _show_help_global
+                exit 1
                 ;;
             *)
                 break
         esac
-        exit
+
     done
 }
 

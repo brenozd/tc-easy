@@ -386,7 +386,7 @@ _parse_args_rm() {
     done
 
     if [ -z "$__args_rm_dev" ] || [ -z "$__args_rm_src_ip" ] || [ -z "$__args_rm_dst_ip" ]; then
-        _show_help_add
+        _show_help_rm
         return
     fi
 
@@ -450,7 +450,7 @@ _parse_args_ls() {
                 ;;
             -?*)
                 _log "error" "Unknown add option: $1"
-                _show_help_add
+                _show_help_ls
                 ;;
             *)
                 break

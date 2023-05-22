@@ -3,6 +3,7 @@
 
 # Global Variables
 __g_force_cmd=0
+__g_log_level=1
 
 # Global return variables
 __g_ip_string=""
@@ -18,24 +19,30 @@ __g_route_loss=""
 _log() {
     case $1 in
         error)
-            __tag="ERROR"
+            __log_tag="ERROR"
             __redirect="2"
+            _log_level=0
         ;;
         warn)
-            __tag="WARN"
+            __log_tag="WARN"
             __redirect="2"
+            __log_level=1
         ;;
         info)
-            __tag="INFO"
+            __log_tag="INFO"
             __redirect="1"
+            __log_level=2
         ;;
         debug)
-            __tag="DEBUG"
+            __log_tag="DEBUG"
             __redirect="1"
+            __log_level=3
         ;;
     esac
 
-    printf '%s - [%s] - %s\n' "$(date)" "$__tag" "$2"
+    if [ "$__g_log_level" -gt "$__log_level" ]; then
+        printf '%s - [%s] - %s\n' "$(date)" "$__log_tag" "$2"
+    fi
 }
 
 # Convert an formated IPv4 string to hexadecimal. Return value is variable __g_ip_hex
@@ -173,7 +180,7 @@ _get_dev_qdisc() {
 }
 
 _show_help_add() {
-    echo "Usage: tc-easy add dev <interface> from <ip> to <ip> OPTIONS"
+    printf "Usage: tc-easy add dev <interface> from <ip> to <ip> OPTIONS\n"
     printf "Options:\n\t--latency=<value>\n\t--loss=<value>\n\t--jitter=<value> (only used if --latency is passed)\n\t--download=<value>\n\t--upload=<value>\n"
 }
 
@@ -327,10 +334,10 @@ _add_route() {
     if _get_dev_qdisc "$__add_route_dev" "root" && [ "$__g_dev_qdisc" != "htb" ]; then
         if [ $__g_force_cmd -ne 1 ] &&  [ "$__continue" != "y" ]; then
             _log "warn" "Interface $__add_route_dev has qdisc $__g_dev_qdisc associated with it"
-            echo "Do you want to continue? All qdisc from interface $__add_route_dev will be deleted [y|n]"
+            printf "Do you want to continue? All qdisc from interface $__add_route_dev will be deleted [y|n]\n"
             read -r __continue
             if [ "$__continue" != "y" ]; then
-                echo "Aborting tc-easy"
+                printf "Aborting tc-easy\n"
                 return 1
             fi
         fi
@@ -389,7 +396,7 @@ _add_route() {
 }
 
 _show_help_rm() {
-    echo "Usage: tc-easy rm dev <interface> from <ip> to <ip>"
+    printf "Usage: tc-easy rm dev <interface> from <ip> to <ip>\n"
 }
 
 _parse_args_rm() {
@@ -424,9 +431,36 @@ _parse_args_rm() {
         esac
     done
 
-    if [ -z "$__args_rm_dev" ] || [ -z "$__args_rm_src_ip" ] || [ -z "$__args_rm_dst_ip" ]; then
+    if [ -z "$__args_rm_dev" ]; then
         _show_help_rm
         return
+    fi
+
+    _remove_route "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"
+
+    return
+
+}
+
+_remove_route() {
+    __rm_route_dev="$1"
+    __rm_route_src_ip="$2"
+    __rm_route_dst_ip="$3"
+    __rm_route_ifb_dev="ifb_$__rm_route_dev"
+
+    if [ -z "$__rm_route_src_ip" ] && [ -z "$__rm_route_dst_ip" ]; then
+        tc qdisc del dev "$__rm_route_dev" root >/dev/null 2>&1
+
+        if _get_dev_qdisc "$__rm_route_dev" "ingress"; then
+            tc qdisc del dev "$__rm_route_dev" ingress >/dev/null 2>&1
+        fi
+
+        if _check_if_interface_exists "$__rm_route_ifb_dev"; then
+            ip link delete "$__rm_route_ifb_dev"
+        fi
+
+        _log "info" "Removed all routes from $__args_rm_dev"
+        return 0
     fi
 
     if ! _is_ipv4_valid "$__args_rm_src_ip" || ! _is_ipv4_valid "$__args_rm_dst_ip"; then
@@ -434,28 +468,18 @@ _parse_args_rm() {
         return
     fi
 
-    if ! _get_route "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"; then
+    if _get_route "$__rm_route_dev" "$__rm_route_src_ip" "$__rm_route_dst_ip"; then
+        __rm_route_filter_handle=$(tc filter show dev "$__rm_route_dev" | grep "flowid $__g_route_flow_handle" | sed -n -e "s/^.*fh 800::\([0-9]\{3\}\).*$/\1/p")
+        tc filter del dev "$__rm_route_dev" parent 1: handle 800::"$__rm_route_filter_handle" prio 2 protocol ip u32
+        tc qdisc del dev "$__rm_route_dev" parent "$__g_route_flow_handle"
+        sudo tc class del dev "$__rm_route_dev" classid "$__g_route_flow_handle"
+    elif _get_route "$__rm_route_ifb_dev" "$__rm_route_src_ip" "$__rm_route_dst_ip"; then
+        __rm_route_filter_handle=$(tc filter show dev "$__rm_route_ifb_dev" | grep "flowid $__g_route_flow_handle" | sed -n -e "s/^.*fh 800::\([0-9]\{3\}\).*$/\1/p")
+        tc filter del dev "$__rm_route_ifb_dev" parent 1: handle 800::"$__rm_route_filter_handle" prio 2 protocol ip u32
+        tc qdisc del dev "$__rm_route_ifb_dev" parent "$__g_route_flow_handle"
+        sudo tc class del dev "$__rm_route_ifb_dev" classid "$__g_route_flow_handle"
+    else
         _log "error" "Route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev does not exists"
-        return
-    fi
-
-    _remove_route "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"
-    _log "info" "Removed route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev"
-    return
-
-}
-
-_remove_route() {
-    __rm_dev="$1"
-
-    tc qdisc del dev "$__rm_dev" root >/dev/null 2>&1
-    if _get_dev_qdisc "$__rm_dev" "ingress"; then
-        tc qdisc del dev "$__rm_dev" ingress >/dev/null 2>&1
-    fi
-
-    __ifb_dev="ifb_$__rm_dev"
-    if _check_if_interface_exists "$__ifb_dev"; then
-        ip link delete "$__ifb_dev"
     fi
 }
 
@@ -503,7 +527,10 @@ _parse_args_ls() {
 
     printf "%-16s%-15s%-20s%-15s%-15s%-15s%-15s\n" "Device" "Source IP" "Destination IP" "Bandwidth" "Latency" "Jitter" "Packet Loss"
     _list_routes "$__args_ls_dev" "$__args_ls_src_ip" "$__args_ls_dst_ip"
-    _list_routes "ifb_$__args_ls_dev" "$__args_ls_src_ip" "$__args_ls_dst_ip"
+
+    if _check_if_interface_exists "ifb_$__args_ls_dev"; then
+        _list_routes "ifb_$__args_ls_dev" "$__args_ls_src_ip" "$__args_ls_dst_ip"
+    fi
 }
 
 _get_flow_parameters() {
@@ -540,7 +567,7 @@ _list_routes() {
     fi
 
     if ! _get_route "$__list_route_dev" "$__list_route_src_ip" "$__list_route_dst_ip"; then
-        _log "error" "Route from $__list_route_src_ip to $__list_route_dst_ip via $__list_route_dev does not exists!"
+        _log "debug" "Route from $__list_route_src_ip to $__list_route_dst_ip via $__list_route_dev does not exists!"
         return 1
     fi
 
@@ -566,8 +593,8 @@ _list_routes() {
 }
 
 _show_help_global() {
-    echo "Usage: tc-easy [add | rm | ls] OPTIONS"
-    echo "Options: --help"
+    printf "Usage: tc-easy [add | rm | ls] OPTIONS\n"
+    printf "Options: --help\n"
 }
 
 _parse_args_global() {

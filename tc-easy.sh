@@ -471,12 +471,16 @@ _remove_route() {
     if _get_route "$__rm_route_dev" "$__rm_route_src_ip" "$__rm_route_dst_ip"; then
         __rm_route_filter_handle=$(tc filter show dev "$__rm_route_dev" | grep "flowid $__g_route_flow_handle" | sed -n -e "s/^.*fh 800::\([0-9]\{3\}\).*$/\1/p")
         tc filter del dev "$__rm_route_dev" parent 1: handle 800::"$__rm_route_filter_handle" prio 2 protocol ip u32
-        tc qdisc del dev "$__rm_route_dev" parent "$__g_route_flow_handle"
+        if tc qdisc show dev "$__rm_route_dev" | grep -q "parent $__g_route_flow_handle"; then
+            tc qdisc del dev "$__rm_route_dev" parent "$__g_route_flow_handle"
+        fi
         sudo tc class del dev "$__rm_route_dev" classid "$__g_route_flow_handle"
     elif _get_route "$__rm_route_ifb_dev" "$__rm_route_src_ip" "$__rm_route_dst_ip"; then
         __rm_route_filter_handle=$(tc filter show dev "$__rm_route_ifb_dev" | grep "flowid $__g_route_flow_handle" | sed -n -e "s/^.*fh 800::\([0-9]\{3\}\).*$/\1/p")
         tc filter del dev "$__rm_route_ifb_dev" parent 1: handle 800::"$__rm_route_filter_handle" prio 2 protocol ip u32
-        tc qdisc del dev "$__rm_route_ifb_dev" parent "$__g_route_flow_handle"
+        if tc qdisc show dev "$__rm_route_ifb_dev" | grep -q "parent $__g_route_flow_handle"; then
+            tc qdisc del dev "$__rm_route_ifb_dev" parent "$__g_route_flow_handle"
+        fi
         sudo tc class del dev "$__rm_route_ifb_dev" classid "$__g_route_flow_handle"
     else
         _log "error" "Route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev does not exists"

@@ -1,7 +1,5 @@
 #!/usr/bin/env sh
 
-# set -e
-# set -x
 
 # Global Variables
 __g_force_cmd=0
@@ -10,7 +8,12 @@ __g_force_cmd=0
 __g_ip_string=""
 __g_ip_hex=""
 __g_dev_qdisc=""
+__g_routes=""
 __g_route_flow_handle=""
+__g_route_bandwidth=""
+__g_route_latency=""
+__g_route_jitter=""
+__g_route_loss=""
 
 _log() {
     case $1 in
@@ -89,58 +92,72 @@ _check_if_interface_exists() {
     return 1
 }
 
+# Get a route
+#   $1 is the interface (device) name
+#   $2 is the src ip
+#   $3 is the dst ip
+#
+# If src ip and dst ip are provided returns 0 if routes exits, 1 otherwhise.
+#   Sets __g_route_flow_handle to the flow handle id if return 0
+# If src ip and dst ip are empty, return 0 if dev has any route and set __g_routes
+#   __g_routes is a variable that contain a triplet per route: src_ip dst_ip flow_id
+_get_route() {
+    __get_route_rc=1
+    __get_route_dev="$1"
+    __get_route_src_ip="$2"
+    __get_route_dst_ip="$3"
 
-# Check if route already exists
-# $1 is the interface (device) name
-# $2 is the src ip
-# $3 is the dst ip
-# Returns 0 if routes exits, 1 otherwhise.
-# Sets __g_route_flow_handle to the flow handle id if return 0
-_check_if_route_exists() {
-    __check_route_rc=1
-    __check_route_dev="$1"
-    __check_route_src_ip="$2"
-    __check_route_dst_ip="$3"
-
-    __check_route_dev_routes=$(tc filter show dev "$__check_route_dev")
-    __check_route_flow_handle=""
-    __check_route_old_ifs=$IFS
+    __get_route_dev_routes=$(tc filter show dev "$__get_route_dev")
+    __get_route_flow_handle=""
+    __g_routes=""
+    __get_route_old_ifs=$IFS
     IFS="
 "
 
-    for line in $__check_route_dev_routes; do
+    for line in $__get_route_dev_routes; do
         case $line in
             # If line is a filter definition, get handle
             "filter"*)
-                __check_route_flow_handle=$(echo "$line" | sed -n -e 's/^.*\([0-9]\+:[0-9]\+\).*/\1/p')
-                __check_route_src_ip_filter=""
-                __check_route_dst_ip_filter=""
+                __get_route_flow_handle=$(echo "$line" | sed -n -e 's/^.*\([0-9]\+:[0-9]\+\).*/\1/p')
+                __get_route_src_ip_filter=""
+                __get_route_dst_ip_filter=""
             ;;
             *"match"*"at 12")
                 # TODO: checar o que é o argumento depois do / no IP
-                __check_route_src_ip_filter=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
+                __get_route_src_ip_filter=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
             ;;
             *"match"*"at 16")
-                __check_route_dst_ip_filter=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
+                __get_route_dst_ip_filter=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
             ;;
         esac
 
-        if [ -n "$__check_route_flow_handle" ] && [ -n "$__check_route_src_ip_filter" ] && [ -n "$__check_route_dst_ip_filter" ]; then
-            _ip_hex_to_string $__check_route_src_ip_filter
-            __check_route_src_ip_filter="$__g_ip_string"
+        if  [ -n "$__get_route_flow_handle" ]     && \
+            [ -n "$__get_route_src_ip_filter" ]   && \
+            [ -n "$__get_route_dst_ip_filter" ]; then
 
-            _ip_hex_to_string $__check_route_dst_ip_filter
-            __check_route_dst_ip_filter="$__g_ip_string"
+            _ip_hex_to_string $__get_route_src_ip_filter
+            __get_route_src_ip_filter="$__g_ip_string"
+            _ip_hex_to_string $__get_route_dst_ip_filter
+            __get_route_dst_ip_filter="$__g_ip_string"
 
-            if [ "$__check_route_src_ip" = "$__check_route_src_ip_filter" ] && [ "$__check_route_dst_ip" = "$__check_route_dst_ip_filter" ]; then
-                __g_route_flow_handle=$__check_route_flow_handle
-                __check_route_rc=0
+            __g_routes="$__g_routes $__get_route_src_ip_filter $__get_route_dst_ip_filter $__get_route_flow_handle"
+            if  [ -n "$__get_route_src_ip" ] && [ -n "$__get_route_dst_ip" ] && \
+                [ "$__get_route_src_ip" = "$__get_route_src_ip_filter" ] && \
+                [ "$__get_route_dst_ip" = "$__get_route_dst_ip_filter" ]; then
+
+                __g_route_flow_handle=$__get_route_flow_handle
+                __g_routes="$__get_route_src_ip_filter $__get_route_dst_ip_filter $__get_route_flow_handle"
+                __get_route_rc=0
                 break
             fi
         fi
     done
-    IFS=$__check_route_old_ifs
-    return $__check_route_rc
+    IFS=$__get_route_old_ifs
+
+    if [ -z "$__get_route_src_ip" ] && [ -z "$__get_route_dst_ip" ] && [ -n "$__g_routes" ]; then
+        __get_route_rc=0
+    fi
+    return $__get_route_rc
 }
 
 # Gets the current qdisc associated with dev at classid. Return value is variable __g_dev_qdisc
@@ -189,42 +206,43 @@ _parse_args_add() {
                 ;;
             --latency|-l)
                 shift
-                __latency="$1"
+                __args_add_latency="$1"
                 shift
                 ;;
             --jitter|-j)
                 shift
-                __jitter="$1"
+                __args_add_jitter="$1"
                 shift
                 ;;
             --loss|-p)
                 shift
-                __packet_loss="$1"
+                __args_add_packet_loss="$1"
                 shift
                 ;;         # Handle
             --reorder|-r)
                 shift
-                __reorder="$1"
+                __args_add_reorder="$1"
                 shift
                 ;;
             --duplication)
                 shift
-                __duplication="$1"
+                __args_add_duplication="$1"
                 shift
                 ;;
             --corruption|-c)
                 shift
-                __corruption="$1"
+                __args_add_corruption="$1"
                 shift
                 ;;
+                # TODO: Pq o download está indo para o upload e o upload está indo para o download? Troquei o nome das variáveis?
             --download|-d)
                 shift
-                __bandwidth_upload="$1"
+                __args_add_bandwidth_upload="$1"
                 shift
                 ;;
             --upload|-u)
                 shift
-                __bandwidth_download="$1"
+                __args_add_bandwidth_download="$1"
                 shift
                 ;;
             -?*)
@@ -237,39 +255,56 @@ _parse_args_add() {
         esac
     done
 
+    __args_add_rc=0
     # TODO: Antes de fazer qualquer coisa checar se há banda disponível no TC
     if [ -z "$__args_add_dev" ] || [ -z "$__args_add_src_ip" ] || [ -z "$__args_add_dst_ip" ]; then
         _show_help_add
-        return
+        return 1
     fi
 
     if ! _is_ipv4_valid "$__args_add_src_ip" || ! _is_ipv4_valid "$__args_add_dst_ip"; then
         _log "error" "Either source or destination IP is not a valid IPv4"
-        return
+        return 1
     fi
 
-    if _check_if_route_exists "$__args_add_dev" "$__args_add_src_ip" "$__args_add_dst_ip"; then
-        _log "error" "Route from $__args_add_src_ip to  $__args_add_dst_ip via $__args_add_dev already exists (flow $__g_route_flow_handle), aborting"
-        return
+    # TODO: Deveriamos sempre ter que setar o sentido, sendo download ou upload e poder especificar uma banda
+    if [ -n "$__args_add_bandwidth_download" ] && \
+        ! _add_route "$__args_add_dev" "$__args_add_src_ip" "$__args_add_dst_ip" \
+        "$__args_add_latency" "$__args_add_jitter" "$__args_add_packet_loss" \
+        "$__args_add_reorder" "$__args_add_duplication" "$__args_add_corruption" \
+        "$__args_add_bandwidth_download"; then
+        _log "error" "Failed to add route from $__args_add_src_ip to $__args_add_dst_ip via $__args_add_dev"
+        __args_add_rc=1
+
     fi
 
-    __ifb_dev="ifb_$__args_add_dev"
-    if ! _check_if_interface_exists "$__ifb_dev"; then
-        ip link add name "$__ifb_dev" type ifb
+    if [ -n "$__args_add_bandwidth_upload" ]; then
+        __ifb_dev="ifb_$__args_add_dev"
+        if ! _check_if_interface_exists "$__ifb_dev"; then
+            ip link add name "$__ifb_dev" type ifb
+        fi
+        ip link set dev "$__ifb_dev" up
+
+        if ! _add_route "$__ifb_dev" "$__args_add_dst_ip" "$__args_add_src_ip" \
+        "$__args_add_latency" "$__args_add_jitter" "$__args_add_packet_loss" \
+        "$__args_add_reorder" "$__args_add_duplication" "$__args_add_corruption" \
+        "$__args_add_bandwidth_upload"; then
+            _log "error" "Failed to add route from $__args_add_dst_ip to $__args_add_src_ip via $__args_add_dev"
+            __args_add_rc=1
+        fi
+
+        if _get_dev_qdisc "$__args_add_dev" "ingress"; then
+            tc qdisc del dev "$__args_add_dev" ingress
+        fi
+
+        tc qdisc add dev "$__args_add_dev" ingress
+        tc filter add dev "$__args_add_dev" ingress matchall action mirred egress redirect dev "$__ifb_dev"
     fi
-    ip link set dev "$__ifb_dev" up
 
-    _add_route "$__args_add_dev" "$__args_add_src_ip" "$__args_add_dst_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_download"
-    _add_route "$__ifb_dev" "$__args_add_dst_ip" "$__args_add_src_ip" "$__latency" "$__jitter" "$__packet_loss" "$__reorder" "$__duplication" "$__corruption" "$__bandwidth_upload"
-
-    if _get_dev_qdisc "$__args_add_dev" "ingress"; then
-        tc qdisc del dev "$__args_add_dev" ingress
+    if [ $__args_add_rc -eq 0 ]; then
+        _log "info" "Added route from $__args_add_src_ip to $__args_add_dst_ip via $__args_add_dev"
     fi
-
-    tc qdisc add dev "$__args_add_dev" ingress
-    tc filter add dev "$__args_add_dev" ingress matchall action mirred egress redirect dev "$__ifb_dev"
-
-    _log "info" "Added route from $__args_add_src_ip to $__args_add_dst_ip via $__args_add_dev"
+    return $__args_add_rc
 }
 
 _add_route() {
@@ -284,6 +319,10 @@ _add_route() {
     __add_route_corruption="$9"
     __add_route_bandwidth="${10}"
 
+    if _get_route "$__add_route_dev" "$__add_route_src_ip" "$__add_route_dst_ip"; then
+        _log "error" "Route from $__add_route_src_ip to  $__add_route_dst_ip via $__add_route_dev already exists (flow $__g_route_flow_handle)"
+        return 1
+    fi
 
     if _get_dev_qdisc "$__add_route_dev" "root" && [ "$__g_dev_qdisc" != "htb" ]; then
         if [ $__g_force_cmd -ne 1 ] &&  [ "$__continue" != "y" ]; then
@@ -292,7 +331,7 @@ _add_route() {
             read -r __continue
             if [ "$__continue" != "y" ]; then
                 echo "Aborting tc-easy"
-                return
+                return 1
             fi
         fi
         tc qdisc del dev "$__add_route_dev" root >/dev/null 2>&1
@@ -395,7 +434,7 @@ _parse_args_rm() {
         return
     fi
 
-    if ! _check_if_route_exists "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"; then
+    if ! _get_route "$__args_rm_dev" "$__args_rm_src_ip" "$__args_rm_dst_ip"; then
         _log "error" "Route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev does not exists"
         return
     fi
@@ -457,24 +496,73 @@ _parse_args_ls() {
         esac
     done
 
-    if [ -z "$__dev" ]; then
+    if [ -z "$__args_ls_dev" ]; then
         _show_help_ls
         return
     fi
 
-    _list_routes "$__dev"
+    printf "%-16s%-15s%-20s%-15s%-15s%-15s%-15s\n" "Device" "Source IP" "Destination IP" "Bandwidth" "Latency" "Jitter" "Packet Loss"
+    _list_routes "$__args_ls_dev" "$__args_ls_src_ip" "$__args_ls_dst_ip"
+    _list_routes "ifb_$__args_ls_dev" "$__args_ls_src_ip" "$__args_ls_dst_ip"
+}
+
+_get_flow_parameters() {
+    __get_flow_dev="$1"
+    __get_flow_id="$2"
+
+    __get_flow_old_ifs=$IFS
+    IFS="
+"
+    __get_flow_dev_class=$(tc class show dev "$__get_flow_dev" | grep "htb $__get_flow_id parent 1:1")
+    __get_flow_dev_class_id=$(echo "$__get_flow_dev_class" | awk '{print $3}')
+    __get_flow_netem=$(tc qdisc show dev "$__get_flow_dev" | grep "netem" | grep "parent $__get_flow_dev_class_id")
+    __g_route_bandwidth=$(echo "$__get_flow_dev_class" | sed -n -e "s/^.*rate \([0-9]\+\).*$/\1/p")
+    __g_route_latency=$(echo "$__get_flow_netem" | sed -n -e "s/^.*delay \([0-9]\+\)ms.*$/\1/p")
+    __g_route_jitter=$(echo "$__get_flow_netem" | sed -n -e "s/^.*delay \([0-9]\+\)ms\s*\([0-9]\+\)ms.*$/\2/p")
+    __g_route_loss=$(echo "$__get_flow_netem" | sed -n -e "s/^.*loss \([0-9]\+\)%.*$/\1/p")
+
+    __g_route_bandwidth=${__g_route_bandwidth:-"-"}
+    __g_route_latency=${__g_route_latency:-"-"}
+    __g_route_jitter=${__g_route_jitter:-"-"}
+    __g_route_loss=${__g_route_loss:-"-"}
+
+    IFS=$__get_flow_old_ifs
 }
 
 _list_routes() {
     __list_route_dev="$1"
     __list_route_src_ip="$2"
     __list_route_dst_ip="$3"
-    __list_routes_dev_qdiscs=$(tc qdisc show dev "$__list_route_dev")
-    __list_routes_dev_classes=$(tc class show dev "$__list_route_dev")
-    __list_routes_dev_filters=$(tc filter show dev "$__list_route_dev")
 
+    if _get_dev_qdisc "$__list_route_dev" "root" && [ "$__g_dev_qdisc" != "htb" ]; then
+        _log "info" "No routes on dev $__list_route_dev"
+        return 1
+    fi
 
-    printf "%s\n" "$__list_routes_dev_qdiscs"
+    if ! _get_route "$__list_route_dev" "$__list_route_src_ip" "$__list_route_dst_ip"; then
+        _log "error" "Route from $__list_route_src_ip to $__list_route_dst_ip via $__list_route_dev does not exists!"
+        return 1
+    fi
+
+    _list_routes_length=$(echo "$__g_routes" | wc -w)
+    _list_routes_index=0
+    while [ "$_list_routes_index" -lt "$_list_routes_length" ]; do
+        # item=$(echo "$__g_routes" | awk -v i=$((_list_routes_index+1)) '{print $i}')
+        # echo "$item"
+        __list_route_print_src_ip=$(echo "$__g_routes" | awk -v i=$((_list_routes_index+1)) '{print $i}')
+        __list_route_print_dst_ip=$(echo "$__g_routes" | awk -v i=$((_list_routes_index+2)) '{print $i}')
+        __list_route_flowid=$(echo "$__g_routes" | awk -v i=$((_list_routes_index+3)) '{print $i}')
+        _get_flow_parameters "$__list_route_dev" "$__list_route_flowid"
+        printf "%-16s%-15s%-20s%-15s%-15s%-15s%-15s\n" \
+                "$__list_route_dev" \
+                "$__list_route_print_src_ip" \
+                "$__list_route_print_dst_ip" \
+                "$__g_route_bandwidth" \
+                "$__g_route_latency" \
+                "$__g_route_jitter" \
+                "$__g_route_loss"
+        _list_routes_index=$((_list_routes_index + 3))
+    done
 }
 
 _show_help_global() {

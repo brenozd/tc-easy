@@ -17,11 +17,12 @@ __g_route_jitter=""
 __g_route_loss=""
 
 _log() {
+    __log_level=0
     case $1 in
         error)
             __log_tag="ERROR"
             __redirect="2"
-            _log_level=0
+            __log_level=0
         ;;
         warn)
             __log_tag="WARN"

@@ -344,7 +344,7 @@ _add_route() {
         return 1
     fi
 
-    if _get_dev_qdisc "$__add_route_dev" "root" && [ "$__g_dev_qdisc" != "htb" ]; then
+    if _get_dev_qdisc "$__add_route_dev" "root" && [ "$__g_dev_qdisc" != "hfsc" ]; then
         if [ $__g_force_cmd -ne 1 ] &&  [ "$__continue" != "y" ]; then
             _log "warn" "Interface $__add_route_dev has qdisc $__g_dev_qdisc associated with it"
             printf "%s\n" "Do you want to continue? All qdisc from interface $__add_route_dev will be deleted [y|n]"
@@ -355,7 +355,7 @@ _add_route() {
             fi
         fi
         tc qdisc del dev "$__add_route_dev" root >/dev/null 2>&1
-        tc qdisc add dev "$__add_route_dev" root handle 1: htb
+        tc qdisc add dev "$__add_route_dev" root handle 1: hfsc
         # TODO: A banda máxima de download/upload deve ser sempre simétrica?
         # TODO: Adicionar fifo_fast como classe default do htb
         __add_route_dev_speed=$(cat /sys/class/net/"$__add_route_dev"/speed >/dev/null 2>&1)
@@ -363,7 +363,7 @@ _add_route() {
             _log "warn" "Cannot get $__add_route_dev speed, assuming 1000mbps"
             __add_route_dev_speed="1000"
         fi
-        tc class add dev "$__add_route_dev" parent 1: classid 1:1 htb rate "$__add_route_dev_speed"mbit ceil "$__add_route_dev_speed"mbit
+        tc class add dev "$__add_route_dev" parent 1: classid 1:1 hfsc sc rate "$__add_route_dev_speed"mbit ul rate "$__add_route_dev_speed"mbit
     fi
 
     # TODO: Os parâmetros do NetEm devem ser mirrored?
@@ -394,16 +394,18 @@ _add_route() {
     fi
 
     # TODO: checar se há banda disponível para a classe
-    __add_route_new_handle=$(tc class show dev "$__add_route_dev" | grep htb | awk '{print $3}' | sort | tail -n1 | awk -F ':' '{print $2+1}')
+    __add_route_new_handle=$(tc class show dev "$__add_route_dev" | grep hfsc | awk '{print $3}' | sort | tail -n1 | awk -F ':' '{print $2+1}')
     __add_route_bandwidth=${__add_route_bandwidth:-"50"}
     # Se não houver banda disponível, perguntar quando alocar e checar se o valor fornecido é menor que o máximo disponível (speed da interface - soma de todas as rates dos HTBs)
-    tc class add dev "$__add_route_dev" parent 1:1 classid 1:"$__add_route_new_handle" htb rate "$__add_route_bandwidth"mbit ceil "$__add_route_bandwidth"mbit prio 2
+    tc class add dev "$__add_route_dev" parent 1:1 classid 1:"$__add_route_new_handle" hfsc sc rate "$__add_route_bandwidth"mbit ul rate "$__add_route_bandwidth"mbit
 
     if [ -n "$__add_route_netem_params" ]; then
         # Remove trailing whitespaces, otherwhise TC does not accept __add_route_netem_params
         __add_route_netem_params=$(echo "$__add_route_netem_params" | cut -f 2- -d ' ')
         tc qdisc add dev "$__add_route_dev" parent 1:"$__add_route_new_handle" handle "$__add_route_new_handle":1 netem $__add_route_netem_params
     fi
+
+    tc qdisc add dev "$__add_route_dev" parent 1:"$__add_route_new_handle" handle "$__add_route_new_handle":2 sfq perturb 10
 
     tc filter add dev "$__add_route_dev" protocol ip parent 1: prio 2 u32 match ip src "$__add_route_src_ip" match ip dst "$__add_route_dst_ip" flowid 1:"$__add_route_new_handle"
 }
@@ -563,7 +565,7 @@ _get_flow_parameters() {
     __get_flow_old_ifs=$IFS
     IFS="
 "
-    __get_flow_dev_class=$(tc class show dev "$__get_flow_dev" | grep "htb $__get_flow_id parent 1:1")
+    __get_flow_dev_class=$(tc class show dev "$__get_flow_dev" | grep "hfsc $__get_flow_id parent 1:1")
     __get_flow_dev_class_id=$(echo "$__get_flow_dev_class" | awk '{print $3}')
     __get_flow_netem=$(tc qdisc show dev "$__get_flow_dev" | grep "netem" | grep "parent $__get_flow_dev_class_id")
     __g_route_bandwidth=$(echo "$__get_flow_dev_class" | sed -n -e "s/^.*rate \([0-9]\+[a-zA-Z]\+\).*$/\1/p")
@@ -584,7 +586,7 @@ _list_routes() {
     __list_route_src_ip="$2"
     __list_route_dst_ip="$3"
 
-    if _get_dev_qdisc "$__list_route_dev" "root" && [ "$__g_dev_qdisc" != "htb" ]; then
+    if _get_dev_qdisc "$__list_route_dev" "root" && [ "$__g_dev_qdisc" != "hfsc" ]; then
         _log "info" "No routes on dev $__list_route_dev"
         return 1
     fi
@@ -693,8 +695,8 @@ if ! _check_kmod_enabled "ifb"; then
 
 fi
 
-if ! _check_kmod_enabled "htb"; then
-    _log "warn" "HTB kernel module is deactivated, try to activate it? [y|n]"
+if ! _check_kmod_enabled "hfsc"; then
+    _log "warn" "HFSC kernel module is deactivated, try to activate it? [y|n]"
     read -r __continue
     if [ "$__continue" = "y" ]; then
         if ! modprobe sch_netem; then

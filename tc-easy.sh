@@ -8,6 +8,7 @@ __g_log_level=3
 # Global return variables
 __g_ip_string=""
 __g_ip_hex=""
+__g_netmask_prefix=""
 __g_dev_qdisc=""
 __g_routes=""
 __g_route_flow_handle=""
@@ -70,6 +71,15 @@ _ip_hex_to_string() {
     done
     IFS=$_ip_h2s_old_IFS
     __g_ip_string=$(echo "$__g_ip_string" | cut -d'.' -f 1,2,3,4)
+}
+
+# Convert an hexadecimal netmask to prefix. Return value is variable __g_netmask_prefix
+_hex_netmask_to_prefix() {
+    __g_netmask_prefix=0
+    for octet in $(echo "$1" | awk 'BEGIN{FS=""} {for(i=1; i<=NF; i+=2) printf "%s%s ", $i, $(i+1)}'); do
+         binbits=$(echo "obase=2; ibase=16; ${octet}"| bc | sed 's/0//g')
+         __g_netmask_prefix=$((__g_netmask_prefix+${#binbits}))
+    done
 }
 
 # Check if a given IP/CIDR is a valid IPv4 construction (do not check if values are greater than 255 tho)
@@ -304,11 +314,11 @@ _parse_args_add() {
         fi
 
         if _get_dev_qdisc "$__args_add_dev" "ingress"; then
-            tc qdisc del dev "$__args_add_dev" ingress
+            tc qdisc del dev "$__args_add_dev" handle ffff: ingress
         fi
 
-        tc qdisc add dev "$__args_add_dev" ingress
-        tc filter add dev "$__args_add_dev" ingress matchall action mirred egress redirect dev "$__ifb_dev"
+        tc qdisc add dev "$__args_add_dev" handle ffff: ingress
+        tc filter add dev "$__args_add_dev" handle ffff: ingress matchall action mirred egress redirect dev "$__ifb_dev"
     fi
 
     if [ $__args_add_rc -eq 0 ]; then
@@ -461,7 +471,7 @@ _remove_route() {
         tc qdisc del dev "$__rm_route_dev" root >/dev/null 2>&1
 
         if _get_dev_qdisc "$__rm_route_dev" "ingress"; then
-            tc qdisc del dev "$__rm_route_dev" ingress >/dev/null 2>&1
+            tc qdisc del dev "$__rm_route_dev" handle ffff: ingress >/dev/null 2>&1
         fi
 
         if _check_if_interface_exists "$__rm_route_ifb_dev"; then

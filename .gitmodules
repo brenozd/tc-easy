@@ -1,0 +1,3 @@
+[submodule "docker/speed-test"]
+	path = docker/speed-test
+	url = https://github.com/openspeedtest/Speed-Test.git

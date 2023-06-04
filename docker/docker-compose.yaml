@@ -1,0 +1,27 @@
+version: '3'
+services:
+  openspeedtest:
+    build:
+      context: .
+      dockerfile: openspeedtest.dockerfile
+    image: openspeedtest:tc-easy
+    container_name: openspeedtest
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+
+  iperf3:
+    build:
+      context: .
+      dockerfile: iperf3.dockerfile
+    image: iperf3:tc-easy
+    container_name: iperf3
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "5201:5201/tcp"
+      - "5201:5201/udp"

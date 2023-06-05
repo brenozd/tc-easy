@@ -392,7 +392,8 @@ _add_route() {
     if [ -n "$__add_route_corruption" ]; then
         __add_route_netem_params="$__add_route_netem_params corrupt ${__add_route_corruption}%"
     fi
-
+    # WARNING: ADICIONAR UM DELAY MAXIMO AO HFSC PARA VER SE A VELOCIDADE MELHORA
+    # WARNING: SE O HTB NÃO DROPA OS PACOTES, ENTRE UMA MEDICAO E OUTRA OS PACOTES FICAM NA INTERFACE? ISSO EXPLICA O POR QUE A VELOCIDADE É ALTA
     # TODO: checar se há banda disponível para a classe
     __add_route_new_handle=$(tc class show dev "$__add_route_dev" | grep htb | awk '{print $3}' | sort | tail -n1 | awk -F ':' '{print $2+1}')
     __add_route_bandwidth=${__add_route_bandwidth:-"50"}

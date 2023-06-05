@@ -1,7 +1,7 @@
 FROM nginx:mainline-alpine3.17-slim
 
 ADD https://github.com/openspeedtest/Speed-Test/archive/refs/heads/main.zip /tmp/
-ADD --chmod=0755 https://raw.githubusercontent.com/brenozd/tc-easy/fixes/tc-easy.sh /bin/tc-easy
+ADD --chmod=0755 https://raw.githubusercontent.com/brenozd/tc-easy/HFSC/tc-easy.sh /bin/tc-easy
 
 ENV CONFIG=/etc/nginx/conf.d/OpenSpeedTest-Server.conf
 

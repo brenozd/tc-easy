@@ -397,7 +397,7 @@ _add_route() {
     __add_route_new_handle=$(tc class show dev "$__add_route_dev" | grep hfsc | awk '{print $3}' | sort | tail -n1 | awk -F ':' '{print $2+1}')
     __add_route_bandwidth=${__add_route_bandwidth:-"50"}
     # Se não houver banda disponível, perguntar quando alocar e checar se o valor fornecido é menor que o máximo disponível (speed da interface - soma de todas as rates dos HTBs)
-    tc class add dev "$__add_route_dev" parent 1:1 classid 1:"$__add_route_new_handle" hfsc sc rate "$__add_route_bandwidth"mbit ul rate "$__add_route_bandwidth"mbit
+    tc class add dev "$__add_route_dev" parent 1:1 classid 1:"$__add_route_new_handle" hfsc sc umax 1540 dmax 5ms rate "$__add_route_bandwidth" ul rate "$__add_route_bandwidth"mbit
 
     if [ -n "$__add_route_netem_params" ]; then
         # Remove trailing whitespaces, otherwhise TC does not accept __add_route_netem_params

@@ -1,6 +1,5 @@
 #!/usr/bin/env sh
 
-set -e
 
 # Global Variables
 __g_force_cmd=0

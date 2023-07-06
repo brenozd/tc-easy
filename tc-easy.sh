@@ -3,7 +3,7 @@
 
 # Global Variables
 __g_force_cmd=0
-__g_log_level=1
+__g_log_level=3
 
 # Global return variables
 __g_ip_string=""
@@ -72,9 +72,9 @@ _ip_hex_to_string() {
     __g_ip_string=$(echo "$__g_ip_string" | cut -d'.' -f 1,2,3,4)
 }
 
-# Check if a given IP is a valid IPv4 construction (do not check if values are greater than 255 tho)
+# Check if a given IP/CIDR is a valid IPv4 construction (do not check if values are greater than 255 tho)
 _is_ipv4_valid() {
-    __is_ipv4_valid_ip=$(echo "$1" | sed -n -e 's/^\([0-9]\{1,3\}\.\)\{3\}[0-9]\{1,3\}$/\0/p')
+    __is_ipv4_valid_ip=$(echo "$1" | sed -n -e 's/^\([0-9]\{1,3\}\.\)\{3\}[0-9]\{1,3\}\(\/[0-3][0-9]\?\)\?$/\0/p')
     if [ -z "$__is_ipv4_valid_ip" ]; then
         return 1
     fi
@@ -131,7 +131,9 @@ _get_route() {
                 __get_route_dst_ip_filter=""
             ;;
             *"match"*"at 12")
-                # TODO: checar o que é o argumento depois do / no IP
+                # TODO: O argumento depois do / é a máscara do CIDR se houver, neste caso o precisamos checar se o CIDR é igual ao setado no __get_route_src_ip ou __get_route_dst_ip.
+                # TODO: caso nenhum mask esteja setado considerar /32
+
                 __get_route_src_ip_filter=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
             ;;
             *"match"*"at 16")
@@ -335,7 +337,7 @@ _add_route() {
     if _get_dev_qdisc "$__add_route_dev" "root" && [ "$__g_dev_qdisc" != "htb" ]; then
         if [ $__g_force_cmd -ne 1 ] &&  [ "$__continue" != "y" ]; then
             _log "warn" "Interface $__add_route_dev has qdisc $__g_dev_qdisc associated with it"
-            printf "Do you want to continue? All qdisc from interface $__add_route_dev will be deleted [y|n]\n"
+            printf "%s\n" "Do you want to continue? All qdisc from interface $__add_route_dev will be deleted [y|n]"
             read -r __continue
             if [ "$__continue" != "y" ]; then
                 printf "Aborting tc-easy\n"
@@ -361,7 +363,7 @@ _add_route() {
     if [ -n "$__add_route_latency" ]; then
         __add_route_netem_params="$__add_route_netem_params delay ${__add_route_latency}ms"
         if [ -n "$__add_route_jitter" ]; then
-            __add_route_netem_params="$__add_route_netem_params ${__add_route_jitter}ms distribution normal"
+            __add_route_netem_params="$__add_route_netem_params ${__add_route_jitter}ms distribution paretonormal"
         fi
     fi
 
@@ -374,7 +376,7 @@ _add_route() {
     fi
 
     if [ -n "$__add_route_duplication" ]; then
-        __add_route_netem_params="$__add_route_netem_params reorder ${__add_route_duplication}%"
+        __add_route_netem_params="$__add_route_netem_params duplicate ${__add_route_duplication}%"
     fi
 
     if [ -n "$__add_route_corruption" ]; then
@@ -450,6 +452,12 @@ _remove_route() {
     __rm_route_ifb_dev="ifb_$__rm_route_dev"
 
     if [ -z "$__rm_route_src_ip" ] && [ -z "$__rm_route_dst_ip" ]; then
+        printf "%s\n" "Are you sure you want to remove all routes from interface $__rm_route_dev and $__rm_route_ifb_dev? [y|n]"
+        read -r __continue
+        if [ "$__continue" != "y" ]; then
+            printf "Aborting tc-easy\n"
+            return 1
+        fi
         tc qdisc del dev "$__rm_route_dev" root >/dev/null 2>&1
 
         if _get_dev_qdisc "$__rm_route_dev" "ingress"; then
@@ -475,14 +483,14 @@ _remove_route() {
         if tc qdisc show dev "$__rm_route_dev" | grep -q "parent $__g_route_flow_handle"; then
             tc qdisc del dev "$__rm_route_dev" parent "$__g_route_flow_handle"
         fi
-        sudo tc class del dev "$__rm_route_dev" classid "$__g_route_flow_handle"
+        tc class del dev "$__rm_route_dev" classid "$__g_route_flow_handle"
     elif _get_route "$__rm_route_ifb_dev" "$__rm_route_src_ip" "$__rm_route_dst_ip"; then
         __rm_route_filter_handle=$(tc filter show dev "$__rm_route_ifb_dev" | grep "flowid $__g_route_flow_handle" | sed -n -e "s/^.*fh 800::\([0-9]\{3\}\).*$/\1/p")
         tc filter del dev "$__rm_route_ifb_dev" parent 1: handle 800::"$__rm_route_filter_handle" prio 2 protocol ip u32
         if tc qdisc show dev "$__rm_route_ifb_dev" | grep -q "parent $__g_route_flow_handle"; then
             tc qdisc del dev "$__rm_route_ifb_dev" parent "$__g_route_flow_handle"
         fi
-        sudo tc class del dev "$__rm_route_ifb_dev" classid "$__g_route_flow_handle"
+        tc class del dev "$__rm_route_ifb_dev" classid "$__g_route_flow_handle"
     else
         _log "error" "Route from $__args_rm_src_ip to  $__args_rm_dst_ip via $__args_rm_dev does not exists"
     fi
@@ -548,9 +556,9 @@ _get_flow_parameters() {
     __get_flow_dev_class=$(tc class show dev "$__get_flow_dev" | grep "htb $__get_flow_id parent 1:1")
     __get_flow_dev_class_id=$(echo "$__get_flow_dev_class" | awk '{print $3}')
     __get_flow_netem=$(tc qdisc show dev "$__get_flow_dev" | grep "netem" | grep "parent $__get_flow_dev_class_id")
-    __g_route_bandwidth=$(echo "$__get_flow_dev_class" | sed -n -e "s/^.*rate \([0-9]\+\).*$/\1/p")
-    __g_route_latency=$(echo "$__get_flow_netem" | sed -n -e "s/^.*delay \([0-9]\+\)ms.*$/\1/p")
-    __g_route_jitter=$(echo "$__get_flow_netem" | sed -n -e "s/^.*delay \([0-9]\+\)ms\s*\([0-9]\+\)ms.*$/\2/p")
+    __g_route_bandwidth=$(echo "$__get_flow_dev_class" | sed -n -e "s/^.*rate \([0-9]\+[a-zA-Z]\+\).*$/\1/p")
+    __g_route_latency=$(echo "$__get_flow_netem" | sed -n -e "s/^.*delay \([0-9]\+[a-zA-Z]\+\).*$/\1/p")
+    __g_route_jitter=$(echo "$__get_flow_netem" | sed -n -e "s/^.*delay \([0-9]\+[a-zA-Z]\+\)\s*\([0-9]\+[a-zA-Z]\+\).*$/\2/p")
     __g_route_loss=$(echo "$__get_flow_netem" | sed -n -e "s/^.*loss \([0-9]\+\)%.*$/\1/p")
 
     __g_route_bandwidth=${__g_route_bandwidth:-"-"}
@@ -628,13 +636,11 @@ _parse_args_global() {
                 _parse_args_ls "$@"
                 exit 0
                 ;;
-            -?*)
+            -?*|*)
                 _log "warn" "Unknown subcommand: $1, avaible subcommands are: add, rm and ls"
                 _show_help_global
                 exit 1
                 ;;
-            *)
-                break
         esac
 
     done

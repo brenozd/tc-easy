@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
 #########################################
 ## Controls the verbosity of the script #
@@ -79,28 +79,32 @@ _ip_string_to_hex() {
 ##   - The variable name where to string value will be stored  #
 ################################################################
 _ip_hex_to_string() {
-    __l_h2s_hex=$(echo "$1" | sed 's/.\{2\}/& /g')
+    __l_h2s_hex=$(echo "$1" | sed --quiet '1 s/\([0-9A-Fa-f]\{8\}\).*/\1/p')
+
     __l_ip_string=""
     __l_h2s_old_IFS=$IFS
-    IFS=" "
-    for hex in $__l_h2s_hex; do
-        __l_ip_string="$__l_ip_string$(printf "%d" "0x$hex")."
+    while [ "${#__l_h2s_hex}" -gt 0 ]; do
+        __l_ip_string="$__l_ip_string$(printf "%d" "0x${__l_h2s_hex%${__l_h2s_hex#??}}")."
+        __l_h2s_hex="${__l_h2s_hex#??}"
     done
-    IFS=$__l_h2s_old_IFS
     __l_ip_string=$(echo "$__l_ip_string" | cut -d'.' -f 1,2,3,4)
-    eval "$2='$__l_ip_string'"
-    return 0
+
+    if _is_ipv4_str_valid "$__l_ip_string"; then
+      eval "$2='$__l_ip_string'"
+      return 0
+    fi
+    return 1
 }
 
 ############################################################
-## Check if a given IP/CIDR is a valid IPv4                #
+## Check if a given IP/CIDR is a valid IPv4 String         #
 ## Arguments:                                              #
 ##   - The string representation of ip to be converted     #
 ############################################################
-_is_ipv4_valid() {
+_is_ipv4_str_valid() {
     __l_ipv4_regex="^\([0-9]\{1,3\}\.\)\{3\}[0-9]\{1,3\}\(\/[0-3][0-9]\?\)\?$"
     __l_is_ipv4_valid=$(echo "$1" | sed -n -e "s/$__l_ipv4_regex/\0/p")
-    if [ -z "$__l_is_ipv4_valid" ]; then
+    if [ "$__l_is_ipv4_valid" = "" ]; then
         return 1
     fi
     IFS="."
@@ -109,6 +113,20 @@ _is_ipv4_valid() {
           return 1
         fi
     done
+    return 0
+}
+
+#############################################################
+## Check if a given IP/CIDR is a valid IPv4 Hex             #
+## Arguments:                                               #
+##   - The string representation of ip to be converted      #
+#############################################################
+_is_ipv4_hex_valid() {
+    __l_ipv4_regex="^([0-9a-fA-F][0-9a-fA-F]){4}$"
+    __l_is_ipv4_valid=$(echo "$1" | sed -n -e "s/$__l_ipv4_regex/\0/p")
+    if [ "$__l_is_ipv4_valid" = "" ]; then
+        return 1
+    fi
     return 0
 }
 
@@ -141,7 +159,7 @@ _check_if_interface_exists() {
 
 ###################################################################
 ## Get a flow handle ID for an specific route determined by       #
-## an src and dst ip                                              #
+## a src and dst ip                                               #
 ## Arguments:                                                     #
 ##  - The name of the interface in which the route may            #
 ##    be present                                                  #
@@ -160,7 +178,6 @@ _get_flow_handle_for_route() {
 
     __l_dev_routes=$(tc filter show dev "$__l_dev")
     __l_route_flow_handle=""
-    __l_routes=""
     __l_old_ifs=$IFS
     IFS="
 "
@@ -177,28 +194,30 @@ _get_flow_handle_for_route() {
                 # TODO: O argumento depois do / é a máscara do CIDR se houver, neste caso o precisamos checar se o CIDR é igual ao setado no __get_route_src_ip ou __get_route_dst_ip.
                 # TODO: caso nenhum mask esteja setado considerar /32
                 __l_filter_src_ip=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
+                if ! _ip_hex_to_string "$__l_filter_src_ip" "__l_filter_src_ip"; then
+                  __l_filter_src_ip=""
+                fi
             ;;
             *"match"*"at 16")
                 __l_filter_dst_ip=$(echo "$line" | sed -e 's/^.*\([abcdef0-9]\{8\}\/[abcdef0-9]\{8\}\).*/\1/p' | cut -d'/' -f1)
+                if ! _ip_hex_to_string "$__l_filter_dst_ip" "__l_filter_dst_ip"; then
+                  __l_filter_dst_ip=""
+                fi
             ;;
         esac
 
-        if  [ -n "$__l_src_ip" ] && [ -n "$__l_dst_ip" ] && \
-            [ "$__l_src_ip" = "$__l_filter_src_ip" ] && \
+        if  [ "$__l_src_ip" = "$__l_filter_src_ip" ] && \
             [ "$__l_dst_ip" = "$__l_filter_dst_ip" ]; then
 
-            __g_route_flow_handle=$__l_route_flow_handle
-            __l_routes="$__l_filter_src_ip $__l_filter_dst_ip $__l_route_flow_handle"
+            [ $# -ge 4 ] && eval "$4='$__l_route_flow_handle'"
             __l_rc=0
             break
         fi
     done
+  
     IFS=$__l_old_ifs
 
-    if [ -z "$__l_src_ip" ] && [ -z "$__l_dst_ip" ] && [ -n "$__l_routes" ]; then
-        __l_rc=0
-    fi
-    return $__l_rc
+    return "$__l_rc"
 }
 
 #############################################################
@@ -216,9 +235,11 @@ _get_dev_qdisc() {
     __get_dev_qdisc_dev="$1"
     __get_dev_qdisc_classid="$2"
     __get_dev_qdisc_root_qdisc=$(tc qdisc show dev "$__get_dev_qdisc_dev" "$__get_dev_qdisc_classid")
-    if [ -z "$__get_dev_qdisc_root_qdisc" ]; then
+    if [ "$__get_dev_qdisc_root_qdisc" = "" ]; then
         return 1
     fi
-    __g_dev_qdisc=$(echo "$__get_dev_qdisc_root_qdisc" | awk '{print $2}')
+    
+    __l_dev_qdisc=$(echo "$__get_dev_qdisc_root_qdisc" | awk '{print $2}')
+    [ $# -ge 3 ] && eval "$3='$__l_dev_qdisc'"
     return 0
 }

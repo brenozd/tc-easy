@@ -2,7 +2,6 @@
 
 
 . utils.sh
-_get_flow_handle_for_route
 
 _show_help_ls() {
     printf "Usage: tc-easy ls dev <interface>\n"

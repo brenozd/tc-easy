@@ -76,7 +76,7 @@ _remove_route() {
         return 0
     fi
 
-    if ! _is_ipv4_valid "$__args_rm_src_ip" || ! _is_ipv4_valid "$__args_rm_dst_ip"; then
+    if ! _is_ipv4_str_valid "$__args_rm_src_ip" || ! _is_ipv4_valid "$__args_rm_dst_ip"; then
         _log "error" "Either source or destination IP is not a valid IPv4"
         return
     fi

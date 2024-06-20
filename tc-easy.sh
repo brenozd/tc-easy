@@ -1,5 +1,9 @@
 #!/usr/bin/env sh
 
+. "$PWD/src/utils.sh"
+. "$PWD/src/add.sh"
+. "$PWD/src/list.sh"
+. "$PWD/src/remove.sh"
 
 # Global Variables
 __g_force_cmd=0
@@ -86,7 +90,7 @@ if ! _check_kmod_enabled "htb"; then
     _log "warn" "HTB kernel module is deactivated, try to activate it? [y|n]"
     read -r __continue
     if [ "$__continue" = "y" ]; then
-        if ! modprobe sch_netem; then
+        if ! modprobe sch_htb; then
             _log "error" "Failed to activate module NetEm"
             exit 3
         fi

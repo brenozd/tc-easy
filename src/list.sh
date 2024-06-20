@@ -1,13 +1,21 @@
 #!/bin/sh
 
+. "$PWD/src/utils.sh"
 
-. utils.sh
-
+############################
+## Show add subcomand help #
+############################
 _show_help_ls() {
     printf "Usage: tc-easy ls dev <interface>\n"
     printf "Optional: from <ip>, to <ip>\n"
 }
 
+#########################################################
+## Parse ls subcomand flags and                         #
+## Prints the routes filtered by the parameters         #
+## Arguments:                                           #
+##   - The arguments to be parsed                       #
+#########################################################
 _parse_args_ls() {
     while :; do
         case $1 in

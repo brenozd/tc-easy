@@ -1,6 +1,6 @@
 #!/bin/sh
 
-. utils.sh
+. $PWD/src/utils.sh
 
 _show_help_rm() {
     printf "Usage: tc-easy rm dev <interface> from <ip> to <ip>\n"

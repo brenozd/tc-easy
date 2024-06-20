@@ -1,6 +1,6 @@
 #!/bin/sh
 
-. "$PWD/utils.sh"
+. "$PWD/src/utils.sh"
 
 ############################
 ## Show add subcomand help #
@@ -10,11 +10,12 @@ _show_help_add() {
 	printf "Options:\n\t--latency=<value>\n\t--loss=<value>\n\t--jitter=<value> (only used if --latency is passed)\n\t--download=<value>\n\t--upload=<value>\n"
 }
 
-#####################################
-## Parse add subcomand flags        #
-## Arguments:                       #
-##   - The arguments to be parsed   #
-#####################################
+#########################################################
+## Parse add subcomand flags and                        #
+## Adds the proper limitations according to user flags  #
+## Arguments:                                           #
+##   - The arguments to be parsed                       #
+#########################################################
 _parse_args_add() {
 	while :; do
 		case $1 in
@@ -72,7 +73,7 @@ _parse_args_add() {
 			__args_add_corruption="$1"
 			shift
 			;;
-			# TODO: Pq o download está indo para o upload e o upload está indo para o download? Troquei o gnome das variáveis?
+			# TODO: Pq o download está indo para o upload e o upload está indo para o download? Troquei o nome das variáveis?
 		--download | -d)
 			shift
 			__args_add_bandwidth_upload="$1"
@@ -134,7 +135,7 @@ _parse_args_add() {
 			tc qdisc del dev "$__args_add_dev" ingress
 		fi
 
-    # Redirect all incoming traffic to IFB
+		# Redirect all incoming traffic to IFB
 		tc qdisc add dev "$__args_add_dev" ingress
 		tc filter add dev "$__args_add_dev" ingress matchall action mirred egress redirect dev "$__ifb_dev"
 	fi
@@ -145,6 +146,22 @@ _parse_args_add() {
 	return "$__args_add_rc"
 }
 
+#########################################################
+## Adds limitation between a route characterized by:    #
+##  - A tuple of IPs                                    #
+##  - A port                                            #
+## Arguments:                                           #
+##   - The interface name                               #
+##   - The source ip address                            #
+##   - The destination ip address                       #
+##   - The latency in milliseconds                      #
+##   - The jitter in milliseconds                       #
+##   - The packet loss in percentage                    #
+##   - The reorder chance in percentage                 #
+##   - The duplication chance in percentage             #
+##   - The corruption chance in percentage              #
+##   - The maximum bandwidth in megabits per second     #
+#########################################################
 _add_route() {
 	__add_route_dev="$1"
 	__add_route_src_ip="$2"
@@ -221,10 +238,9 @@ _add_route() {
 	if [ "$__add_route_netem_params" != "" ]; then
 		# Remove trailing whitespaces, otherwise TC does not accept __add_route_netem_params
 		__add_route_netem_params=$(echo "$__add_route_netem_params" | cut -f2- -d' ')
-		tc qdisc add dev "$__add_route_dev" parent 1:"$__add_route_new_handle" handle "$__add_route_new_handle":1 netem $__add_route_netem_params
+		tc qdisc add dev "$__add_route_dev" parent 1:"$__add_route_new_handle" handle "$__add_route_new_handle":1 netem "$__add_route_netem_params"
 	fi
 
 	tc filter add dev "$__add_route_dev" protocol ip parent 1: prio 2 u32 match ip src "$__add_route_src_ip" match ip dst "$__add_route_dst_ip" flowid 1:"$__add_route_new_handle"
 }
 
-# _add_route "wlp0s20f3" "10.24.30.7" "10.24.30.8" "100" "0" "0" "0" "0" "0" "10"

@@ -16,11 +16,15 @@ target_link_options(tc-easy PRIVATE ${LINK_OPTIONS})
 include(FetchLibbacktrace)
 include(FetchArgparse)
 
-target_link_libraries(tc-easy backtrace)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBNL REQUIRED libnl-3.0 libnl-route-3.0)
+
+target_include_directories(tc-easy PRIVATE ${LIBNL_INCLUDE_DIRS})
+target_link_libraries(tc-easy PRIVATE backtrace ${LIBNL_LIBRARIES})
 if(STATIC_ARGPARSE)
-  target_link_libraries(tc-easy argparse_static)
+  target_link_libraries(tc-easy PRIVATE argparse_static)
 else()
-  target_link_libraries(tc-easy argparse_shared)
+  target_link_libraries(tc-easy PRIVATE argparse_shared)
 endif()
 
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src")

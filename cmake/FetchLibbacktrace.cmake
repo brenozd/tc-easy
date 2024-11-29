@@ -5,8 +5,8 @@ set(BUILD_SHARED OFF CACHE STRING "" FORCE)
 
 FetchContent_Declare(
   libbacktrace
-  GIT_REPOSITORY git@github.com:brenozd/libbacktrace.git
-  GIT_TAG fix/cmake
+  GIT_REPOSITORY https://github.com/brenozd/libbacktrace.git
+  GIT_TAG master
   GIT_SHALLOW TRUE
   OVERRIDE_FIND_PACKAGE)
 

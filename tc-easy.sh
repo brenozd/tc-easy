@@ -687,7 +687,7 @@ if ! _check_kmod_enabled "htb"; then
     _log "warn" "HTB kernel module is deactivated, try to activate it? [y|n]"
     read -r __continue
     if [ "$__continue" = "y" ]; then
-        if ! modprobe sch_netem; then
+        if ! modprobe sch_htb; then
             _log "error" "Failed to activate module NetEm"
             exit 3
         fi

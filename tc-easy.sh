@@ -184,7 +184,7 @@ _get_dev_qdisc() {
 
 _show_help_add() {
     printf "Usage: tc-easy add dev <interface> from <ip> to <ip> OPTIONS\n"
-    printf "Options:\n\t--latency=<value>\n\t--loss=<value>\n\t--jitter=<value> (only used if --latency is passed)\n\t--download=<value>\n\t--upload=<value>\n"
+    printf "Options:\n\t--latency <value>\n\t--loss <value>\n\t--jitter <value> (only used if --latency is passed)\n\t--download <value>\n\t--upload <value>\n"
 }
 
 _parse_args_add() {

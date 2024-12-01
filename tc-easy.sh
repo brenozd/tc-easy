@@ -409,6 +409,10 @@ _parse_args_rm() {
                 _show_help_rm
                 exit
                 ;;
+            -f|--froce)
+                __g_force_cmd=1
+                shift
+                ;;
             dev)
                 shift
                 _check_if_interface_exists "$1" || return
@@ -452,11 +456,13 @@ _remove_route() {
     __rm_route_ifb_dev="ifb_$__rm_route_dev"
 
     if [ -z "$__rm_route_src_ip" ] && [ -z "$__rm_route_dst_ip" ]; then
-        printf "%s\n" "Are you sure you want to remove all routes from interface $__rm_route_dev and $__rm_route_ifb_dev? [y|n]"
-        read -r __continue
-        if [ "$__continue" != "y" ]; then
-            printf "Aborting tc-easy\n"
-            return 1
+        if [ $__g_force_cmd -ne 1 ]; then
+          printf "%s\n" "Are you sure you want to remove all routes from interface $__rm_route_dev and $__rm_route_ifb_dev? [y|n]"
+          read -r __continue
+          if [ "$__continue" != "y" ]; then
+              printf "Aborting tc-easy\n"
+              return 1
+          fi
         fi
         tc qdisc del dev "$__rm_route_dev" root >/dev/null 2>&1
 
@@ -620,6 +626,10 @@ _parse_args_global() {
             -d|--debug)
                 shift
                 set -x
+                ;;
+            -f|--froce)
+                __g_force_cmd=1
+                shift
                 ;;
             add)
                 shift

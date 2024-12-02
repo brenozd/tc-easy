@@ -364,11 +364,14 @@ _add_route() {
         __add_route_netem_params="$__add_route_netem_params delay ${__add_route_latency}ms"
         if [ -n "$__add_route_jitter" ]; then
             __add_route_netem_params="$__add_route_netem_params ${__add_route_jitter}ms distribution paretonormal"
+        else
+          __add_route_jitter=0
         fi
       else
-        # If no latency was set, use 3ms as default, which seens reasonable for a local network
+        # If no latency was set, use 3 +-1ms as default, which seens reasonable for a local network
         # This will be used to calculate the netem limit later
-        __add_route_latency="3"
+        __add_route_latency=3
+        __add_route_jitter=1
     fi
 
     if [ -n "$__add_route_packet_loss" ]; then
@@ -396,9 +399,12 @@ _add_route() {
     if [ -n "$__add_route_netem_params" ]; then
         __t_dev_mtu=$(cat "/sys/class/net/${__add_route_dev}/mtu")
         __add_route_mtu_dev=${__t_dev_mtu:-1500}
+        __add_route_max_latency=$(echo "$__add_route_latency + $__add_route_jitter" | bc)
+
         # According to this SO answer, we should add 50% more lmit than the max packet rate * delay
         # https://stackoverflow.com/a/38277940
-        __add_route_netem_limit=$(echo "scale=10; $__add_route_bandwidth * 1000 * 1000 * ($__add_route_latency / 1000) / ($__add_route_mtu_dev * 8) * 1.5" | bc)
+        __add_route_netem_limit=$(echo "scale=10; $__add_route_bandwidth * 1000 * 1000 * ($__add_route_max_latency / 1000) / ($__add_route_mtu_dev * 8) * 1.5" | bc)
+        __add_route_netem_limit=$(echo "$__add_route_netem_limit" | awk '{print int($1)}')
 
         # Remove trailing whitespaces, otherwhise TC does not accept __add_route_netem_params
         __add_route_netem_params=$(echo "$__add_route_netem_params" | cut -f 2- -d ' ')

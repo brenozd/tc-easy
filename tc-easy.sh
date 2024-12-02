@@ -398,7 +398,7 @@ _add_route() {
         __add_route_mtu_dev=${__t_dev_mtu:-1500}
         # According to this SO answer, we should add 50% more lmit than the max packet rate * delay
         # https://stackoverflow.com/a/38277940
-        __add_route_netem_limit=$(echo "$__add_route_bandwidth * 1000 * 1000 * ($__add_route_latency / 1000) / ($__add_route_mtu_dev * 8) * 1.5" | bc)
+        __add_route_netem_limit=$(echo "scale=10; $__add_route_bandwidth * 1000 * 1000 * ($__add_route_latency / 1000) / ($__add_route_mtu_dev * 8) * 1.5" | bc)
 
         # Remove trailing whitespaces, otherwhise TC does not accept __add_route_netem_params
         __add_route_netem_params=$(echo "$__add_route_netem_params" | cut -f 2- -d ' ')

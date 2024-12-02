@@ -365,6 +365,10 @@ _add_route() {
         if [ -n "$__add_route_jitter" ]; then
             __add_route_netem_params="$__add_route_netem_params ${__add_route_jitter}ms distribution paretonormal"
         fi
+      else
+        # If no latency was set, use 3ms as default, which seens reasonable for a local network
+        # This will be used to calculate the netem limit later
+        __add_route_latency="3"
     fi
 
     if [ -n "$__add_route_packet_loss" ]; then
@@ -387,15 +391,21 @@ _add_route() {
     __add_route_new_handle=$(tc class show dev "$__add_route_dev" | grep htb | awk '{print $3}' | sort | tail -n1 | awk -F ':' '{print $2+1}')
     __add_route_bandwidth=${__add_route_bandwidth:-"50"}
     # Se não houver banda disponível, perguntar quando alocar e checar se o valor fornecido é menor que o máximo disponível (speed da interface - soma de todas as rates dos HTBs)
-    tc class add dev "$__add_route_dev" parent 1:1 classid 1:"$__add_route_new_handle" htb rate "$__add_route_bandwidth"mbit ceil "$__add_route_bandwidth"mbit prio 2
+    tc class add dev "$__add_route_dev" parent 1:1 classid 1:"$__add_route_new_handle" htb rate "$__add_route_bandwidth"mbit ceil "$__add_route_bandwidth"mbit prio 0
 
     if [ -n "$__add_route_netem_params" ]; then
+        __t_dev_mtu=$(cat "/sys/class/net/${__add_route_dev}/mtu")
+        __add_route_mtu_dev=${__t_dev_mtu:-1500}
+        # According to this SO answer, we should add 50% more lmit than the max packet rate * delay
+        # https://stackoverflow.com/a/38277940
+        __add_route_netem_limit=$(echo "$__add_route_bandwidth * 1000 * 1000 * ($__add_route_latency / 1000) / ($__add_route_mtu_dev * 8) * 1.5" | bc)
+
         # Remove trailing whitespaces, otherwhise TC does not accept __add_route_netem_params
         __add_route_netem_params=$(echo "$__add_route_netem_params" | cut -f 2- -d ' ')
-        tc qdisc add dev "$__add_route_dev" parent 1:"$__add_route_new_handle" handle "$__add_route_new_handle":1 netem $__add_route_netem_params
+        tc qdisc add dev "$__add_route_dev" parent 1:"$__add_route_new_handle" handle "$__add_route_new_handle":1 netem limit "$__add_route_netem_limit" $__add_route_netem_params
     fi
 
-    tc filter add dev "$__add_route_dev" protocol ip parent 1: prio 2 u32 match ip src "$__add_route_src_ip" match ip dst "$__add_route_dst_ip" flowid 1:"$__add_route_new_handle"
+    tc filter add dev "$__add_route_dev" protocol ip parent 1: prio 0 u32 match ip src "$__add_route_src_ip" match ip dst "$__add_route_dst_ip" flowid 1:"$__add_route_new_handle"
 }
 
 _show_help_rm() {
@@ -485,14 +495,14 @@ _remove_route() {
 
     if _get_route "$__rm_route_dev" "$__rm_route_src_ip" "$__rm_route_dst_ip"; then
         __rm_route_filter_handle=$(tc filter show dev "$__rm_route_dev" | grep "flowid $__g_route_flow_handle" | sed -n -e "s/^.*fh 800::\([0-9]\{3\}\).*$/\1/p")
-        tc filter del dev "$__rm_route_dev" parent 1: handle 800::"$__rm_route_filter_handle" prio 2 protocol ip u32
+        tc filter del dev "$__rm_route_dev" parent 1: handle 800::"$__rm_route_filter_handle" prio 0 protocol ip u32
         if tc qdisc show dev "$__rm_route_dev" | grep -q "parent $__g_route_flow_handle"; then
             tc qdisc del dev "$__rm_route_dev" parent "$__g_route_flow_handle"
         fi
         tc class del dev "$__rm_route_dev" classid "$__g_route_flow_handle"
     elif _get_route "$__rm_route_ifb_dev" "$__rm_route_src_ip" "$__rm_route_dst_ip"; then
         __rm_route_filter_handle=$(tc filter show dev "$__rm_route_ifb_dev" | grep "flowid $__g_route_flow_handle" | sed -n -e "s/^.*fh 800::\([0-9]\{3\}\).*$/\1/p")
-        tc filter del dev "$__rm_route_ifb_dev" parent 1: handle 800::"$__rm_route_filter_handle" prio 2 protocol ip u32
+        tc filter del dev "$__rm_route_ifb_dev" parent 1: handle 800::"$__rm_route_filter_handle" prio 0 protocol ip u32
         if tc qdisc show dev "$__rm_route_ifb_dev" | grep -q "parent $__g_route_flow_handle"; then
             tc qdisc del dev "$__rm_route_ifb_dev" parent "$__g_route_flow_handle"
         fi

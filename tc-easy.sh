@@ -184,7 +184,14 @@ _get_dev_qdisc() {
 
 _show_help_add() {
     printf "Usage: tc-easy add dev <interface> from <ip> to <ip> OPTIONS\n"
-    printf "Options:\n\t--latency <value>\n\t--loss <value>\n\t--jitter <value> (only used if --latency is passed)\n\t--download <value>\n\t--upload <value>\n"
+    printf "Options:\n"
+    printf "\t--latency <value>\n"
+    printf "\t--loss <value>\n"
+    printf "\t--jitter <value> (only used if --latency is passed)\n" 
+    printf "\t--download <value>\n" 
+    printf "\t--egress <value> (same as --download)\n " 
+    printf "\t--upload <value>\n"
+    printf "\t--ingress <value> (same as --upload)\n " 
 }
 
 _parse_args_add() {
@@ -214,22 +221,22 @@ _parse_args_add() {
                 __g_force_cmd=1
                 shift
                 ;;
-            --latency|-l)
+            --latency)
                 shift
                 __args_add_latency="$1"
                 shift
                 ;;
-            --jitter|-j)
+            --jitter)
                 shift
                 __args_add_jitter="$1"
                 shift
                 ;;
-            --loss|-p)
+            --loss)
                 shift
                 __args_add_packet_loss="$1"
                 shift
                 ;;         # Handle
-            --reorder|-r)
+            --reorder)
                 shift
                 __args_add_reorder="$1"
                 shift
@@ -239,18 +246,18 @@ _parse_args_add() {
                 __args_add_duplication="$1"
                 shift
                 ;;
-            --corruption|-c)
+            --corruption)
                 shift
                 __args_add_corruption="$1"
                 shift
                 ;;
                 # TODO: Pq o download está indo para o upload e o upload está indo para o download? Troquei o nome das variáveis?
-            --download|-d)
+            --download|--egress)
                 shift
                 __args_add_bandwidth_upload="$1"
                 shift
                 ;;
-            --upload|-u)
+            --upload|--ingress)
                 shift
                 __args_add_bandwidth_download="$1"
                 shift
@@ -690,6 +697,11 @@ if ! command -v awk >/dev/null; then
 fi
 
 if ! command -v tc >/dev/null; then
+    _log "warn" "TC utility not found, consider installing it"
+    exit 2
+fi
+
+if ! command -v bc >/dev/null; then
     _log "warn" "TC utility not found, consider installing it"
     exit 2
 fi
